@@ -1,0 +1,222 @@
+---
+title: "Tool Calling & Agentic Training"
+---
+
+Telescope supports training models that use tools during rollouts. Two approaches are available: **environment-level** tool calling via the `ToolEnvironment` base class, and **inference-level** tool calling via vLLM's built-in parser. You can use either or both depending on your needs.
+
+## ToolEnvironment
+
+`ToolEnvironment` extends `MultiTurnEnvironment` with built-in tool calling support. You define tools as Python functions, and the class handles schema generation, prompt injection, tool call parsing, execution, and result formatting.
+
+### Defining tools
+
+Tools are regular Python functions with type hints and docstrings:
+
+```python
+def add(a: float, b: float) -> float:
+    """Add two numbers together."""
+    return a + b
+
+def subtract(a: float, b: float) -> float:
+    """Subtract b from a."""
+    return a - b
+```
+
+Pass them to the constructor:
+
+```python
+class CalculatorEnvironment(ToolEnvironment):
+    def __init__(self, **kwargs):
+        super().__init__(
+            tools=[add, subtract, multiply, divide],
+            max_turns=5,
+            tool_call_format="xml",
+            system_prompt="You are a math assistant. Use tools for calculations.",
+            **kwargs,
+        )
+```
+
+Telescope automatically converts each function to an OpenAI-compatible tool schema using `func_to_tool_schema()`. The type hints map to JSON Schema types (`float` → `number`, `str` → `string`, `int` → `integer`, `bool` → `boolean`), and the docstring becomes the tool description.
+
+### How tool calls are processed
+
+Each turn follows this cycle:
+
+```
+Model output → parse_tool_calls() → execute_tool() → format_tool_result() → next turn
+```
+
+1. **Parse** — The model's completion is scanned for tool calls. By default, XML format is used with a JSON object inside the tags:
+   ```xml
+   <tool_call>
+   {"name": "add", "arguments": {"a": 15, "b": 7}}
+   </tool_call>
+   ```
+
+2. **Execute** — Each parsed `ToolCall` is executed by calling the corresponding Python function with the parsed arguments.
+
+3. **Format** — Results are formatted as tool response messages and appended to the conversation.
+
+4. **Check** — `is_final_answer()` determines if the model is providing a final answer (no tool calls) or wants to continue using tools.
+
+### Building a ToolEnvironment
+
+The minimal subclass needs `load_dataset` and `compute_reward`:
+
+```python
+from telescope.environments.tool_env import ToolEnvironment
+from telescope.environments.base import Sample, RewardResult, RolloutState
+from telescope.environments.parsers import extract_xml_tag
+
+
+class MyToolEnv(ToolEnvironment):
+    def __init__(self, **kwargs):
+        super().__init__(
+            tools=[my_tool_a, my_tool_b],
+            max_turns=8,
+            system_prompt="Use tools to solve the task.",
+            **kwargs,
+        )
+
+    def load_dataset(self, num_samples=-1, **kwargs):
+        # Load and return list[Sample]
+        ...
+
+    def is_final_answer(self, completion, state):
+        """Check if the model is giving a final answer instead of a tool call."""
+        answer = extract_xml_tag(completion, "answer")
+        if answer:
+            return True
+        return len(self.parse_tool_calls(completion)) == 0
+
+    def compute_reward(self, state, eos_token=""):
+        tool_metrics = self.get_tool_metrics(state)
+        correct = check_answer(state)  # your verification logic
+        return RewardResult(
+            total_reward=1.0 if correct else 0.0,
+            sample_metrics={**tool_metrics, "correct": float(correct)},
+        )
+```
+
+### Override points
+
+| Method | Default behavior | When to override |
+|--------|-----------------|-----------------|
+| `parse_tool_calls(text)` | Parses XML-tagged tool calls | Custom tool call format |
+| `execute_tool(tool_call)` | Calls the matching Python function | Tools need side effects, async I/O, or sandbox execution |
+| `format_tool_result(result)` | Formats as XML tool response | Custom result formatting |
+| `is_final_answer(completion, state)` | True if no tool calls found | Custom completion detection (e.g., `<answer>` tags) |
+
+### Tool metrics
+
+`get_tool_metrics(state)` returns a dict with usage stats from the trajectory:
+
+```python
+{
+    "total_tool_calls": 3,
+    "tool_success_count": 2,
+    "tool_error_count": 1,
+    "tool_success_rate": 0.67,
+    "unique_tools_used": 2,
+    "add_calls": 2,         # per-tool call counts
+    "subtract_calls": 1,
+}
+```
+
+These are useful both for reward computation (e.g., penalizing excessive tool use) and for monitoring via `sample_metrics`. See [Reward Design](/training/reward-design) for patterns on incorporating tool metrics into rewards.
+
+## vLLM tool calling
+
+For models that support native tool calling (e.g., Hermes-format models), you can enable vLLM's built-in parser instead of or alongside environment-level parsing:
+
+```yaml
+enable_tool_call: true
+tool_call_parser: "hermes"
+```
+
+When enabled, vLLM parses tool calls from model output using the specified format and returns structured tool call objects. This is useful when:
+- The model was pretrained with a specific tool call format (Hermes, etc.)
+- You want tool call parsing handled at the inference level rather than in environment code
+
+### Thinking mode with tools
+
+You can combine thinking mode and tool calling:
+
+```yaml
+enable_thinking: true
+enable_tool_call: true
+tool_call_parser: "hermes"
+```
+
+The model generates `<think>` blocks for reasoning, then produces tool calls. The thinking content is separated from the tool call output.
+
+## Sandbox execution
+
+For environments that need to execute code (not just call Python functions), Telescope provides a pluggable sandbox system.
+
+### SandboxConfig
+
+```python
+from telescope.environments._sandbox import SandboxConfig, get_provider
+
+config = SandboxConfig(
+    image="python:3.11-slim",
+    cpu=2,
+    memory_mb=4096,
+    disk_size_gb=10,
+    gpu_count=0,
+    timeout_seconds=300,
+    environment_vars={"MY_VAR": "value"},
+    name="my-sandbox",             # optional identifier
+    extra={"template": "custom"},  # provider-specific overrides
+)
+
+provider = get_provider("prime")  # or "modal", "daytona", "e2b"
+handle = await provider.create(config)
+result = await provider.execute(handle, "python -c 'print(1+1)'", timeout=30)
+# result.exit_code, result.stdout, result.stderr
+await provider.destroy(handle)
+```
+
+### Supported providers
+
+Telescope is agnostic to which sandbox provider is used — any provider that implements the `SandboxProvider` interface (`create`, `execute`, `upload_bytes`, `upload_file`, `destroy`) will work. For convenience, the following providers come pre-configured:
+
+| Provider | Description | Credentials |
+|----------|-------------|-------------|
+| `prime` | Prime infrastructure | Provider-specific |
+| `modal` | Cloud-based sandboxes with fast cold starts | Modal SDK auth |
+| `daytona` | Self-hosted sandbox environments | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET` env vars |
+| `e2b` | Cloud sandboxes for prototyping and development | `E2B_API_KEY` env var |
+
+### Using sandboxes in environments
+
+The `mini_swe_agent_plus` environment demonstrates the full pattern:
+
+1. **Create sandboxes** in `create_initial_state()` with concurrency control via semaphores
+2. **Execute commands** in `env_response()` by parsing tool calls and running them in the sandbox
+3. **Clean up** in a destroy hook when the rollout completes
+
+Sandbox environments use async I/O throughout. The sandbox provider handles timeout enforcement, error translation, and resource cleanup.
+
+## Multi-turn configuration for agentic tasks
+
+Key config parameters for tool-using and agentic environments:
+
+```yaml
+# Scheduling: prioritize earlier turns to reduce head-of-line blocking
+vllm_scheduling_policy: "priority"
+
+# Reuse exact token IDs across turns (avoids tokenization mismatches)
+interleaved_rollouts: true
+
+# Limit concurrent requests per server (important for multi-turn)
+max_concurrent_prompts_per_server: 32
+
+# Maximum turns before stopping
+# Set in your environment's __init__ via max_turns parameter
+```
+
+`priority` scheduling is important for multi-turn environments: it ensures the model completes earlier turns before starting new ones, preventing scenarios where later turns queue behind a flood of first-turn requests.
+
+`interleaved_rollouts` (enabled by default) reuses token IDs from previous turns exactly, avoiding subtle tokenization differences that could corrupt logprob computation across turns.

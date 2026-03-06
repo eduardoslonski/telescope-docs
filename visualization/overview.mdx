@@ -1,0 +1,23 @@
+---
+title: "Overview"
+---
+
+The Overview page is the landing page of the Telescope UI. It shows training progress, key metrics, and the full run configuration for the selected run.
+
+## Training progress
+
+A progress bar shows completed steps out of total steps, along with elapsed runtime and an estimated time remaining (ETA). The ETA adapts based on recent step durations.
+
+A second progress bar shows the **trainer bucket** — how many sample groups have been collected toward the next training step, and how many completed batches are waiting for the trainer.
+
+## Plots
+
+A customizable grid of metric charts. By default it shows **Reward**, **Time per Step**, and **Grad Norm**. You can add charts from the full metric catalog (rewards, advantages, evals, rollouts, timeline, custom metrics, and more), toggle EMA smoothing, and overlay metrics from multiple runs on the same chart for comparison. The layout persists across sessions.
+
+## Run configuration
+
+The full training config for the run. You can compare it against another run's config to see exactly what parameters changed between the two.
+
+## Code
+
+You can see the exact training code that was used for the run. You can also compare it with the code of other runs to see the differences.

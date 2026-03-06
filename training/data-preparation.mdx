@@ -1,0 +1,189 @@
+---
+title: "Data Preparation"
+---
+
+How to prepare and format datasets for training with Telescope. For the environment API itself (`load_dataset`, `compute_reward`), see [Environments](/training/environments).
+
+## Dataset format
+
+Every environment implements `load_dataset()` which returns a list of `Sample` objects. A `Sample` has three fields:
+
+- **`prompt`** — the question or task (string or list of chat messages)
+- **`answer`** — ground truth for reward computation
+- **`metadata`** — any extra data needed by your reward function
+
+The environment is responsible for loading data from any source and converting it to `Sample` objects.
+
+### Loading from HuggingFace
+
+The most common pattern — load from the HuggingFace Hub:
+
+```python
+from datasets import load_dataset as hf_load_dataset
+
+# Inside your environment class:
+def load_dataset(self, num_samples=-1, shuffle=False, seed=42, **kwargs):
+    dataset = hf_load_dataset("my-org/my-dataset", split="train")
+
+    if shuffle:
+        dataset = dataset.shuffle(seed=seed)
+    if num_samples > 0:
+        dataset = dataset.select(range(min(num_samples, len(dataset))))
+
+    samples = []
+    for item in dataset:
+        samples.append(Sample(
+            prompt=item["question"],
+            answer=item["answer"],
+            metadata={"question": item["question"]},
+        ))
+
+    self._samples = samples
+    return samples
+```
+
+### Loading from local files
+
+For JSON, JSONL, CSV, or Parquet files:
+
+```python
+import json
+
+# Inside your environment class:
+def load_dataset(self, num_samples=-1, **kwargs):
+    with open("data/my_dataset.jsonl") as f:
+        rows = [json.loads(line) for line in f]
+
+    samples = [
+        Sample(prompt=row["prompt"], answer=row["answer"], metadata=row)
+        for row in rows
+    ]
+
+    if num_samples > 0:
+        samples = samples[:num_samples]
+
+    self._samples = samples
+    return samples
+```
+
+### Procedural generation
+
+For game and puzzle environments, generate samples programmatically:
+
+```python
+# Inside your environment class:
+def load_dataset(self, num_samples=-1, **kwargs):
+    n = num_samples if num_samples > 0 else 1000
+    samples = []
+    for i in range(n):
+        puzzle = generate_puzzle(seed=42 + i)
+        samples.append(Sample(
+            prompt=puzzle["description"],
+            answer=str(puzzle["solution"]),
+            metadata=puzzle,
+        ))
+    self._samples = samples
+    return samples
+```
+
+## Prompt formatting
+
+### Single-turn prompts
+
+`SingleTurnEnvironment` handles prompt formatting automatically using the model's tokenizer `apply_chat_template()`. You control the framing with two parameters:
+
+```python
+class MyEnvironment(SingleTurnEnvironment):
+    def __init__(self, **kwargs):
+        super().__init__(
+            system_prompt="You are a helpful assistant.",
+            instruction_prompt="Solve the following problem step by step.",
+            **kwargs,
+        )
+```
+
+At rollout time, the prompt is assembled as:
+
+```
+[system] system_prompt
+[user]   instruction_prompt + "\n\n" + sample.prompt
+```
+
+Then passed through `apply_chat_template()` to produce the final token sequence with the model's expected special tokens.
+
+### Thinking mode
+
+When `add_thinking_prefix: true` is set as an environment kwarg, the environment prepends a `<think>` prefix to the model's generation. This teaches the model to reason in a thinking block before producing an answer. The instruction prompt should mention the expected format:
+
+```python
+instruction_prompt = (
+    "Show your work in <think> </think> tags, "
+    "and put your final answer within \\boxed{}."
+)
+```
+
+### Multi-turn prompts
+
+Multi-turn environments use `get_initial_prompt()` which returns a list of `ChatMessage` dicts:
+
+```python
+def get_initial_prompt(self, sample):
+    return [
+        {"role": "system", "content": self.system_prompt},
+        {"role": "user", "content": sample.prompt},
+    ]
+```
+
+For environments that need per-sample system prompts (e.g., ACEBench where each sample has its own API documentation), override this method:
+
+```python
+def get_initial_prompt(self, sample):
+    return [
+        {"role": "system", "content": sample.metadata["api_docs"]},
+        {"role": "user", "content": sample.prompt},
+    ]
+```
+
+## Multi-environment datasets
+
+When training on multiple environments, each environment loads its own dataset independently. Prompts are sampled proportionally to the `weight` of each environment:
+
+```yaml
+environments:
+  - name: "hendrycks_math"
+    weight: 0.6
+    reward_min: 0.0
+    reward_max: 1.0
+  - name: "countdown"
+    weight: 0.4
+    reward_min: 0.0
+    reward_max: 2.0
+```
+
+### Avoiding data leakage
+
+If you use the same environment for both training and evaluation, enable `separate_eval_samples` to reserve a portion of the dataset exclusively for eval:
+
+```yaml
+environments:
+  - name: "hendrycks_math"
+    weight: 1.0
+
+evals:
+  - name: "hendrycks_math"
+    num_samples: 200
+
+    separate_eval_samples: true  # first 200 samples reserved for eval, excluded from training
+```
+
+## Dataset sizing
+
+The relationship between dataset size and training configuration:
+
+- **`number_of_steps`** — how many training steps to run
+- **`prompts_batch_size_for_trainer`** — number of prompt groups per training batch
+- **`group_size`** — completions generated per prompt (each prompt produces `group_size` samples)
+
+Total unique prompts consumed per step = `prompts_batch_size_for_trainer` (each group is one prompt). Over a full run, you need at least `number_of_steps * prompts_batch_size_for_trainer` unique prompts. If the dataset is smaller, prompts will be recycled.
+
+For most RL training, some recycling is fine — the model generates different completions each time, so the same prompt produces different training signal. However, excessive recycling on a very small dataset can lead to overfitting to specific prompts.

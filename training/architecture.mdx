@@ -1,0 +1,70 @@
+---
+title: "Architecture"
+---
+
+Telescope coordinates three main components to run RL post-training: the orchestrator, the training engine, and the inference engine. All components run on a [Ray](https://docs.ray.io/) cluster, which handles resource allocation and placement across GPUs.
+
+## How it works
+
+Everything starts from a config file that sets up the model, algorithm, worker counts, and the [environments](/training/environments) to train on. The orchestrator loads the environment datasets and begins sending prompts to the inference engine, which generates completions using vLLM. As completions come back, the orchestrator calls the environment's reward function to score each one. Once enough scored samples accumulate into a full training batch, the orchestrator sends it to the trainer, which runs a gradient step with the configured RL algorithm (GRPO by default) and then broadcasts the updated weights back to the inference engine. The key insight is that neither side waits for the other — the inference engine keeps generating as long as the orchestrator feeds it prompts, and the trainer keeps training as long as there are batches ready. This overlap is what makes Telescope efficient (see [Async Training](/training/async-training)).
+
+## Orchestrator
+
+The orchestrator is the central coordinator. It dispatches prompts to inference servers, collects completions, computes rewards and advantages, batches samples, and sends them to the trainer. After each training step, it broadcasts updated weights from the trainer to all inference workers via NCCL, so inference always uses the latest model. It also manages evaluations and logs metrics to Weights & Biases.
+
+## Training engine
+
+The training engine computes the RL policy gradient loss and updates model weights. Telescope supports two backends:
+
+### FSDP
+
+PyTorch's Fully Sharded Data Parallel. Each GPU holds a full copy of the data with model parameters sharded across GPUs using `torch.distributed.fully_shard`.
+
+- Best for models that fit within data-parallel scaling (up to ~14B parameters)
+- Uses Flash Attention 2 for efficient packed-sequence training (falls back to PyTorch SDPA if not installed)
+- Mixed precision with `bfloat16`
+- Gradient checkpointing to reduce memory
+
+Set `train_backend: "fsdp"` in your config.
+
+### Megatron
+
+For larger models (14B+) that require model parallelism. Uses [Megatron-Core](https://github.com/NVIDIA/Megatron-LM) for:
+
+- **Tensor Parallelism (TP)** — shards model layers across GPUs
+- **Pipeline Parallelism (PP)** — distributes layers across pipeline stages
+- **Context Parallelism (CP)** — shards the sequence dimension
+- **Expert Parallelism (EP)** — shards MoE expert layers
+
+Additional features:
+- Distributed optimizer (shards optimizer states across data-parallel ranks)
+- Sequence parallel (shards LayerNorm/dropout across the sequence dimension, requires TP > 1)
+- FP8 training on Hopper GPUs via Transformer Engine
+
+Set `train_backend: "megatron"` and configure parallelism sizes:
+
+```yaml
+train_backend: "megatron"
+megatron_tensor_parallel_size: 4
+megatron_pipeline_parallel_size: 2
+megatron_context_parallel_size: 1
+```
+
+## Inference engine
+
+Telescope uses [vLLM](https://github.com/vllm-project/vllm) for fast inference during rollouts. Each inference server:
+
+- Exposes an OpenAI-compatible completions API
+- Supports tensor parallel inference across multiple GPUs
+- Receives weight updates from the trainer via a custom NCCL worker extension — no model reload needed
+- Supports tool calling and reasoning parsers for agentic environments
+
+The orchestrator distributes prompts across inference servers in a round-robin fashion, with configurable concurrency per server (`max_concurrent_prompts_per_server`).
+
+## Weight synchronization
+
+After each training step, the trainer gathers its weights and broadcasts them to all vLLM workers via NCCL. The vLLM workers update their model in-place without restarting, so inference immediately uses the latest weights with minimal overhead.
+
+## RL algorithms
+
+Telescope supports several RL [algorithms](/training/algorithms) for computing the policy gradient, including GRPO (default), RLOO, REINFORCE++, DR-GRPO, CISPO, GSPO, and SAPO. These can be combined with PPO clipping for trust-region updates.

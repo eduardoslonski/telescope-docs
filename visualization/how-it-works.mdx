@@ -1,0 +1,30 @@
+---
+title: "How It Works"
+---
+
+Telescope UI runs locally on your machine and pulls training data from Weights & Biases into a local database for fast querying and visualization.
+
+```text
+Trainer → W&B → Telescope UI → DuckDB → Dashboard
+```
+
+## Run discovery
+
+When you launch the UI and provide your W&B credentials, it scans your W&B projects for runs tagged with `telescope`. Any matching run is automatically picked up and listed in the sidebar. You can hide a run from the UI by adding the `telescope-ignore` tag in W&B.
+
+## Data sync
+
+During training, the trainer continuously uploads structured data (metrics, timeline events, rollouts, evals, GPU stats) to W&B as compressed archives. The UI downloads these archives, extracts the parquet files inside, and inserts them into a local DuckDB database.
+
+The sync is **incremental** — the UI tracks what it has already ingested and only downloads new data. For a running training, it polls every few seconds so the dashboard stays up to date in near real time.
+
+There are two categories of data:
+
+- **Events** — timeline events and system metrics (orchestrator events, trainer events, inference timings, GPU/CPU/vLLM metrics). Uploaded as rolling 30-minute blocks.
+- **Steps** — per-step rollout data (prompts, completions, rewards, eval results, golden answers). Uploaded as blocks of up to 500 steps.
+
+Both categories also have a **tail** archive that contains the most recent data, updated every 5 seconds, so the UI can show fresh results without waiting for a full block to finalize.
+
+## Querying
+
+Once data is in DuckDB, the dashboard frontend queries it through the local FastAPI server. All pages — Overview, Metrics, Rollouts, Rollouts Discarded, Timeline, Infra, Evals — read from this same local database, which makes queries fast regardless of how much data your training run has produced.

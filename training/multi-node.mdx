@@ -1,0 +1,138 @@
+---
+title: "Multi-Node Training"
+---
+
+Telescope uses [Ray](https://docs.ray.io/) to distribute work across machines. On a single node, Ray starts automatically when you run `train.py`. For multi-node training, you start a Ray cluster first and then launch training against it.
+
+## Starting a Ray cluster
+
+Start the head node on the first machine:
+
+```bash
+ray start --head --num-gpus=8 --port=6379
+```
+
+Then join worker nodes from each additional machine:
+
+```bash
+ray start --address=<head-node-ip>:6379 --num-gpus=8
+```
+
+Replace `<head-node-ip>` with the IP address of the head node. Once all nodes have joined, launch training from the head node:
+
+```bash
+uv run train.py --config configs/my_run.yaml
+```
+
+Telescope connects to the cluster via `ray_address: "auto"` (the default), discovers all available GPUs, and places workers across nodes automatically.
+
+## Worker placement
+
+Telescope places inference servers and trainer workers using Ray placement groups. Two config options control how workers are distributed across nodes:
+
+```yaml
+ray_inference_placement_strategy: "PACK"    # default
+ray_trainer_placement_strategy: "PACK"      # default
+```
+
+Available strategies:
+- **`PACK`** — pack workers onto as few nodes as possible. Minimizes cross-node communication.
+- **`SPREAD`** — spread workers across nodes evenly.
+- **`STRICT_PACK`** — like PACK but fails if workers can't fit on a single node.
+- **`STRICT_SPREAD`** — like SPREAD but requires each worker on a different node.
+
+For most setups, `PACK` is the right choice — it keeps NCCL communication within a node where NVLink is available, and only goes cross-node when necessary.
+
+## Example: 2-node setup
+
+With 2 nodes of 8 GPUs each (16 GPUs total), you might configure:
+
+```yaml
+# 4 inference servers (2 GPUs each, TP=2) = 8 GPUs
+inference_num_workers: 4
+inference_tensor_parallel_size: 2
+
+# 8 trainer workers (1 GPU each, FSDP) = 8 GPUs
+trainer_num_workers: 8
+train_backend: "fsdp"
+```
+
+With `PACK` placement, Ray will try to place related workers together on the same node, minimizing cross-node traffic.
+
+## Example: 4-node Megatron setup
+
+For a large model across 4 nodes of 8 GPUs (32 GPUs total):
+
+```yaml
+# 2 inference servers (4 GPUs each, TP=4) = 8 GPUs
+inference_num_workers: 2
+inference_tensor_parallel_size: 4
+
+# 24 trainer GPUs with Megatron parallelism
+trainer_num_workers: 24
+train_backend: "megatron"
+megatron_tensor_parallel_size: 4
+megatron_pipeline_parallel_size: 2
+# Data parallel size = 24 / (4 * 2) = 3
+```
+
+## Docker on multiple nodes
+
+Run the same Docker container on each node, then start Ray inside:
+
+**Head node:**
+
+```bash
+docker run --rm --gpus all --ipc=host --shm-size=16g \
+  --network=host \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
+
+# Inside the container:
+ray start --head --num-gpus=8 --port=6379
+```
+
+**Worker nodes:**
+
+```bash
+docker run --rm --gpus all --ipc=host --shm-size=16g \
+  --network=host \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
+
+# Inside the container:
+ray start --address=<head-node-ip>:6379 --num-gpus=8
+```
+
+<Note>
+  `--network=host` is required for multi-node so that Ray and NCCL can communicate between containers across machines.
+</Note>
+
+Then launch training from the head node container as usual.
+
+## Shared filesystem
+
+All nodes need access to the same model weights and checkpoint directory. The simplest approach is a shared filesystem (NFS, Lustre, etc.) mounted at the same path on all nodes. If you don't have a shared filesystem, make sure:
+
+- The model is cached on every node (HuggingFace downloads it on first use)
+- `checkpoint_dir` points to a shared location, or checkpoints are only saved from one node
+
+## NCCL configuration
+
+NCCL handles GPU-to-GPU communication for weight synchronization and distributed training. On a single node, Telescope automatically uses the loopback interface. For multi-node, NCCL needs to find the right network interface.
+
+If you have InfiniBand:
+
+```bash
+export NCCL_IB_DISABLE=0
+export NCCL_IB_HCA=mlx5_0  # your IB device
+```
+
+If using TCP (Ethernet):
+
+```bash
+export NCCL_IB_DISABLE=1
+export NCCL_SOCKET_IFNAME=eth0  # your network interface
+```
+
+Set these environment variables on all nodes before starting Ray.

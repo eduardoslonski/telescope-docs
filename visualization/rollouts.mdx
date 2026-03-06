@@ -1,0 +1,29 @@
+---
+title: "Rollouts"
+---
+
+The Rollouts page lets you inspect every sample the model generated during training — the prompts, completions, rewards, and per-sample metrics. There is also a separate **Discarded Rollouts** page that shows samples that were thrown away (e.g. due to async staleness or zero advantage), with a badge indicating the discard reason.
+
+## Browsing samples
+
+The left sidebar lets you navigate through samples by training step. Within each step, samples are organized into **groups** — each group shares the same prompt, and you can click into a group to see all the individual completions and how they compare.
+
+Metric columns in the sidebar show color-coded dots for each sample's reward, advantage, token count, and any custom metrics, so you can quickly scan for patterns across a group.
+
+## Sample view
+
+Selecting a sample shows the full rollout in the main panel:
+
+- **Prompt** — system prompt and user prompt with token counts
+- **Completions** — the model's response, with multi-turn conversations shown as separate turns. For agentic environments, you'll see the alternating assistant/user (tool) turns
+- **Rewards** — total reward and per-metric breakdowns, color-coded on a red-to-green scale based on the environment's reward range
+- **Advantage** — the sample's advantage within its group
+- **Golden answers** — reference answers when available, so you can compare against the expected output
+
+The **Render** menu lets you toggle formatting for think blocks, markdown, LaTeX, and code blocks — useful for inspecting reasoning traces or structured outputs.
+
+You can also view the **raw text** of the full sample as a single string.
+
+## Metrics sidebar
+
+The right sidebar shows training metric charts alongside the rollouts, so you can correlate what the model is generating with how metrics are evolving. You can click on a chart to jump to that step's rollouts. It supports the same metric catalog, EMA smoothing, and multi-run overlay as the Metrics page.

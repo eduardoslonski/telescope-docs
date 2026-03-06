@@ -1,0 +1,36 @@
+---
+title: "Metrics"
+---
+
+The Metrics page shows all training metrics as charts, updated in real time. You can switch the x-axis between **step** and **time**, toggle **EMA** smoothing, and set a **max step/time** limit to zoom into a specific range of training.
+
+## All view
+
+The default view organizes every available metric into sections:
+
+- **Custom Metrics** — metrics logged by the trainer with section/group structure (keys use `/` delimiters like `section/group/metric`)
+- **Reward** — reward sum stats (mean, std, min, max)
+- **Samples Metrics** — per-reward-function breakdowns from your environment's `sample_metrics`
+- **Advantage** — advantage statistics with a zero-line reference
+- **Evals** — one subsection per eval, showing eval-specific metrics
+- **Rollouts** — token length distributions for prompts, completions, and totals
+- **Discarded Rollouts** — discard counts, zero-advantage breakdowns, and token metrics for discarded samples
+- **Timeline** — step timing breakdowns (forward, backward, loss, KL, weight sync, etc.) at both full-step and per-microbatch granularity
+
+## Custom view
+
+A fully editable dashboard where you can build your own layout. Create **sections** and **groups**, add plots from the metric catalog, and reorder everything with drag-and-drop. The layout is saved server-side, so it persists across sessions and devices.
+
+## Per-chart controls
+
+Each chart has its own settings accessible via the settings icon:
+
+- **Ignore Outliers** — hides extreme values using IQR-based filtering so you can focus on the meaningful range
+- **Ignore First Step** — excludes step 0, which is often much slower due to compilation. Enabled by default for timing metrics
+- **Min Y / Max Y** — manually set the y-axis range to zoom into a specific value range
+
+Active filters show as removable badges on the chart.
+
+## Multi-run comparison
+
+When multiple runs are selected in the sidebar, all runs are overlaid on the same charts with their assigned colors, making it easy to compare training dynamics across experiments.

@@ -1,0 +1,175 @@
+---
+title: "All Features"
+---
+
+An overview of Telescope's key features and capabilities.
+
+---
+
+### Async training
+
+Inference and training run concurrently on separate GPU pools. While the trainer updates weights, inference servers keep generating samples for the next batch. This eliminates idle GPU time and significantly increases throughput. Controlled by `max_async_rollout`. See [Async Training](/training/async-training).
+
+### Stale rollout cancellation
+
+When training runs ahead of inference, older in-flight rollouts become off-policy. Telescope automatically cancels rollouts that are too many weight updates behind, avoiding wasted compute on stale samples. Controlled by `max_off_policy_steps`.
+
+### Truncated importance sampling (TIS)
+
+Corrects for the logprob mismatch between inference-time and training-time weights caused by async training. Applies importance sampling weights clamped to a maximum value, keeping gradient estimates unbiased without high variance. Controlled by `use_tis` and `tis_cap`.
+
+### Sequence packing
+
+Multiple samples are packed into a single sequence up to `seq_len` tokens, so the trainer processes dense batches without wasting compute on padding. Attention masks ensure samples don't attend to each other.
+
+### Minibatches
+
+Each rollout batch can be split into multiple minibatches for multiple gradient steps per batch (PPO-style). This extracts more learning signal from each set of rollouts, useful when rollout generation is expensive. Controlled by `number_of_minibatches`.
+
+### Prompt prefetch
+
+The orchestrator pre-tokenizes and prepares upcoming prompts in a background buffer while the current batch is being generated. This eliminates prompt preparation latency between rollout groups. Controlled by `enable_prompt_prefetch` and `prompt_prefetch_buffer_size`.
+
+### Zero-advantage filtering
+
+Groups where all samples received identical rewards carry no learning signal (zero advantage). Telescope drops these from the training batch so the trainer only processes informative samples. Controlled by `discard_group_zero_advantage`.
+
+### Multi-environment training
+
+Train on multiple environments simultaneously with weighted sampling. Each environment contributes prompts proportionally to its weight, and rewards are normalized per-environment. See [Environments](/training/environments).
+
+### FSDP and Megatron backends
+
+Two training backends cover models from 1B to 100B+ parameters. FSDP (data parallel) is simpler and works well up to ~14B. Megatron adds tensor, pipeline, context, and expert parallelism for larger models. See [Architecture](/training/architecture).
+
+### In-place weight synchronization
+
+After each training step, updated weights are broadcast from the trainer to all vLLM inference servers via NCCL. The vLLM workers update their model in-place without restarting, so inference immediately uses the latest weights with minimal overhead.
+
+### Multi-turn environments
+
+Environments can define interactive loops where the model and environment exchange messages over multiple rounds. The orchestrator manages the full trajectory, and reward is computed over the complete interaction. See [Environments](/training/environments).
+
+### Tool calling
+
+vLLM inference servers support tool calling parsers (e.g., Hermes) for training agentic models that invoke tools during rollouts. Tool calls are parsed from model output, executed by the environment, and results are fed back as the next turn. Controlled by `enable_tool_call` and `tool_call_parser`. See [Tool Calling & Agentic Training](/training/tool-calling).
+
+### Tool environment base class
+
+`ToolEnvironment` extends `MultiTurnEnvironment` with built-in tool calling support. Define Python functions as tools, and the environment automatically converts them to OpenAI-compatible schemas, parses tool calls from model output (XML tags by default), executes them, and returns results. Handles error recovery and tracks tool usage metrics. See [Tool Calling & Agentic Training](/training/tool-calling).
+
+### Sandbox execution
+
+For code generation and agentic environments, Telescope provides a pluggable sandbox system for safe code execution. Supports multiple providers (Prime, Modal, Daytona, E2B) behind a unified API, so environment code works the same regardless of infrastructure. Each sandbox gets configurable CPU, memory, disk, and timeout limits. See [Tool Calling — Sandbox execution](/training/tool-calling#sandbox-execution).
+
+### Interleaved rollouts
+
+In multi-turn environments, token IDs are reused exactly across turns instead of re-tokenizing from text. This avoids subtle tokenization mismatches between turns that could corrupt logprob computation. Enabled by default with `interleaved_rollouts`.
+
+### 7 RL algorithms
+
+GRPO, RLOO, REINFORCE++, DR-GRPO, CISPO, GSPO, and SAPO — each with different tradeoffs for advantage estimation and gradient weighting. All can be combined with PPO clipping for trust-region updates. See [Algorithms](/training/algorithms).
+
+### PPO clipping
+
+PPO-style ratio clipping can be layered on top of GRPO, RLOO, REINFORCE++, or DR-GRPO for trust-region updates. Clipping bounds are configurable with `clip_low` and `clip_high`, and reference logprobs can come from the rollout or be recomputed by the trainer. Controlled by `use_ppo_clip`.
+
+### Group and batch advantage normalization
+
+Advantages can be normalized within each prompt group (`advantage_norm: "group"`) or across the full training batch (`advantage_norm: "batch"`). Group normalization is the default and works well for most setups; batch normalization is required by REINFORCE++ and can stabilize training with large batch sizes.
+
+### Periodic evals
+
+Run evaluations on dedicated inference servers during training without interrupting rollout generation. Supports pass@k metrics, custom eval benchmarks, and baseline/final evals. See [Evals](/training/evals).
+
+### Separate eval samples
+
+When using the same environment for both training and evaluation, `separate_eval_samples` reserves the first N samples exclusively for eval and excludes them from training. This prevents data leakage between training and evaluation.
+
+### Checkpointing and resume
+
+Save checkpoints periodically with configurable retention policies. Resume training from any checkpoint with full state restoration (model, optimizer, scheduler, orchestrator counters, dataset position). Convert checkpoints to HuggingFace format for deployment. See [Checkpointing](/training/checkpointing).
+
+### HuggingFace checkpoint conversion
+
+A built-in converter transforms native training checkpoints (FSDP DCP or Megatron dist\_checkpointing) into standard HuggingFace format (safetensors + config.json + tokenizer). Works for both single and batch conversion, and handles large models with automatic sharding. See [Checkpointing](/training/checkpointing).
+
+### FP8 training
+
+On Hopper GPUs (H100), the Megatron backend supports FP8 compute via Transformer Engine for faster training with lower memory usage. Controlled by `megatron_fp8`.
+
+### Mixed precision
+
+FSDP uses `bfloat16` mixed precision by default for efficient training. The model dtype and mixed precision dtype are independently configurable. Controlled by `model_dtype` and `mixed_precision_dtype`.
+
+### Flash Attention 2
+
+The FSDP backend uses Flash Attention 2 for memory-efficient packed-sequence training when available, falling back to PyTorch SDPA if `flash-attn` is not installed. Flash Attention's varlen kernel handles variable-length sequences correctly through the attention mask, which is critical for sequence packing.
+
+### Gradient checkpointing
+
+Both backends support gradient checkpointing (activation recomputation) to reduce GPU memory usage by ~15–20 GB at the cost of additional compute. Enabled by default in FSDP and configurable for Megatron via `megatron_gradient_checkpointing`.
+
+### CPU optimizer offload
+
+Megatron can offload optimizer states to CPU memory, freeing GPU memory for larger models or batch sizes. Overlaps D2H/H2D transfers with compute to minimize overhead. Controlled by `megatron_optimizer_cpu_offload`.
+
+### Distributed optimizer
+
+Shards optimizer states across data-parallel ranks so each GPU only stores a fraction of the full optimizer. Reduces per-GPU memory proportionally to the number of DP ranks. Controlled by `megatron_use_distributed_optimizer`.
+
+### Sequence parallelism
+
+Shards the sequence dimension in LayerNorm and dropout regions across tensor-parallel ranks, reducing activation memory. Requires TP > 1. Controlled by `megatron_sequence_parallel`.
+
+### Context parallelism
+
+Shards the sequence dimension across multiple GPUs for training on very long sequences that don't fit in a single GPU's memory. Controlled by `megatron_context_parallel_size`.
+
+### Expert parallelism
+
+For Mixture-of-Experts models, shards expert layers across GPUs so each GPU handles a subset of experts. Controlled by `megatron_expert_parallel_size`.
+
+### LR scheduling
+
+Supports constant, linear decay, and cosine decay schedules with configurable warmup steps and minimum LR ratio. Controlled by `lr_scheduler`, `warmup_steps`, and `min_lr_ratio`.
+
+### GPU timeline logging
+
+Records fine-grained GPU events during each training step using CUDA events for accurate timing. Events include forward pass, backward pass, gradient reduction, optimizer step, and weight broadcast — visualized as a Gantt chart in the Telescope UI.
+
+### vLLM tracing
+
+Captures per-request OpenTelemetry traces from vLLM inference servers, including queue time, time to first token, prefill time, and decode time. Traces are collected via a built-in OTLP receiver and logged alongside training events. Controlled by `enable_vllm_tracing`.
+
+### System metrics collection
+
+Continuously monitors GPU utilization, memory, temperature, power draw, clock speeds, and CPU/system memory across all nodes. Metrics are sampled every second and uploaded to W&B for real-time hardware monitoring.
+
+### vLLM metrics collection
+
+Scrapes Prometheus metrics from each vLLM inference server, including running/waiting requests, KV cache utilization, prefix cache hit rate, token throughput, and request latencies. Provides real-time visibility into inference server health during training.
+
+### Placement strategies
+
+Control how Ray distributes inference and trainer workers across nodes. Pack workers together to maximize NVLink usage, or spread them for better fault isolation. See [Multi-Node Training](/training/multi-node).
+
+### Priority scheduling
+
+vLLM inference uses priority-aware scheduling that prioritizes earlier turns in multi-turn rollouts, reducing head-of-line blocking and improving multi-turn throughput. Controlled by `vllm_scheduling_policy`.
+
+### Configurable weight broadcast
+
+Weight synchronization supports bucketed flattening for throughput or per-tensor mode for memory efficiency. Options for CPU staging, pinned memory, and freeing Megatron grad buffers during broadcast to save ~14 GB of GPU memory.
+
+### Individual sample lanes
+
+Each sample gets its own concurrency slot instead of one per prompt group, improving throughput for environments with high variance in completion time. Enabled by default. Controlled by `enable_individual_sample_lanes`.
+
+### Reward normalization
+
+When training on multiple environments with different reward scales, `reward_min` and `reward_max` per environment allow Telescope to normalize rewards to a common range. This prevents environments with larger reward magnitudes from dominating the training signal. See [Reward Design](/training/reward-design).
+
+### Standalone eval driver
+
+Evaluate saved checkpoints outside of training. The standalone driver loads checkpoints, converts them to HuggingFace format on the fly, spins up vLLM inference, runs evals, and logs results to an existing W&B run. See [Evals](/training/evals).

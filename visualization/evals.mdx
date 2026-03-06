@@ -1,0 +1,19 @@
+---
+title: "Evals"
+---
+
+The Evals page lets you inspect evaluation results at each step where an eval was run. It uses the same sample viewer as the [Rollouts](/visualization/rollouts) page, adapted for eval data.
+
+## Browsing evals
+
+You can switch between different eval environments using the dropdown in the left sidebar. Each eval shows its samples organized by step — navigate between steps to see how the model's eval performance evolves during training.
+
+For evals configured with multiple completions per prompt (pass@k), clicking a sample expands to show all completions so you can compare them.
+
+## Sample view
+
+Each eval sample shows the prompt, the model's completion, per-metric scores, and golden answers when available. The same render options (think blocks, markdown, LaTeX, code) are available for inspecting outputs.
+
+## Metrics sidebar
+
+The right sidebar shows eval-specific metric charts over training steps, so you can track how eval scores trend alongside the samples you're inspecting.

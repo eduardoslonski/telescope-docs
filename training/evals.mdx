@@ -1,0 +1,145 @@
+---
+title: "Evals"
+---
+
+Telescope runs evaluations during training to track model performance over time. Evals use dedicated inference servers, run with their own generation parameters, and log results separately from training metrics.
+
+## Configuration
+
+Add evals to your training config under the `evals` key:
+
+```yaml
+evals:
+  - name: "math500"
+    eval_every: 10
+    num_samples: 500
+    temperature: 0.6
+    max_tokens: 3000
+  - name: "countdown"
+    eval_every: 20
+    num_samples: 200
+    max_tokens: 2000
+```
+
+Each eval entry supports:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `name` | *(required)* | Eval or environment name |
+| `eval_every` | `10` | Run every N training steps |
+| `num_samples` | `-1` (all) | Number of samples to evaluate |
+| `temperature` | inherited | Override sampling temperature |
+| `top_p` | inherited | Override nucleus sampling |
+| `max_tokens` | inherited | Override max generation tokens |
+| `pass_k` | `{}` | pass@k / pass^k configuration |
+| `separate_eval_samples` | `false` | Exclude eval samples from training data |
+| `kwargs` | `{}` | Extra kwargs passed to the eval/environment |
+
+## Eval servers
+
+Evals run on dedicated inference servers that are reserved from the inference pool:
+
+```yaml
+eval_num_servers: 1  # Number of inference servers dedicated to evals
+```
+
+When an eval triggers, these servers are temporarily drained of training requests, run the eval, then resume training work. Setting `eval_num_servers: 0` disables periodic evals during training.
+
+## Baseline and final evals
+
+In addition to periodic evals during training, Telescope can run evals before the first training step (baseline) and after the last step (final):
+
+```yaml
+eval_before_training: true   # Run all evals before step 1
+eval_after_training: true    # Run all evals after the last step
+eval_start_end_use_all_servers: true  # Use all servers for baseline/final (faster)
+```
+
+When `eval_start_end_use_all_servers` is `true`, baseline and final evals use every inference server (not just the dedicated eval servers), since no training is happening at those points.
+
+## Eval sources
+
+When Telescope resolves an eval `name`, it checks two locations in order:
+
+1. **Dedicated eval** — `src/telescope/evals/<name>/eval.py`
+2. **Environment fallback** — `src/telescope/environments/<name>/environment.py`
+
+This means any training environment can also be used as an eval by referencing its name. Dedicated evals exist for benchmarks that have no training environment (e.g., `math500` uses the MATH-500 test set but wraps the `hendrycks_math` environment for answer verification).
+
+## Building a dedicated eval
+
+Create a folder under `src/telescope/evals/` with an `eval.py` file. The simplest approach is wrapping an existing environment:
+
+```python
+from telescope.evals import Eval
+from telescope.environments.base import EvalMetricsResult, Sample
+
+class MyEval(Eval):
+    environment_name = "my_environment"  # Wraps this environment
+
+    def load_dataset(self, num_samples=-1, **kwargs):
+        # Load a different dataset than the training environment
+        super().load_dataset(num_samples, **kwargs)
+        # Optionally filter samples
+        self._samples = [s for s in self._samples if some_condition(s)]
+        return self._samples
+```
+
+Setting `environment_name` gives the eval access to the environment's prompt formatting, reward function, and `compute_eval_metrics`. You only need to override what you want to change.
+
+For fully standalone evals (no training environment), leave `environment_name` as `None` and implement everything directly:
+
+```python
+class MyBenchmarkEval(Eval):
+    def load_dataset(self, num_samples=-1, **kwargs):
+        # Load your benchmark dataset
+        self._samples = [...]
+        return self._samples
+
+    def compute_eval_metrics(self, completion, sample, eos_token=""):
+        # Score the completion
+        return EvalMetricsResult(
+            metrics={"accuracy": 1.0 if correct else 0.0},
+            golden_answers={"answer": sample.answer},
+        )
+```
+
+## pass@k
+
+For tasks where you want to measure whether the model can solve a problem in k attempts, configure `pass_k`:
+
+```yaml
+evals:
+  - name: "math500"
+    eval_every: 20
+    num_samples: 100
+    max_tokens: 3000
+    pass_k:
+      at_k:
+        metrics: ["correct"]   # Which metrics to compute pass@k for
+        k: [1, 4, 8]           # Compute pass@1, pass@4, pass@8
+      pow_k:
+        metrics: ["correct"]
+        k: [4]                 # Compute pass^4 (all 4 correct)
+```
+
+- **pass@k** — probability that at least 1 of k completions is correct (unbiased estimator from Chen et al., 2021)
+- **pass^k** — probability that all k completions are correct
+
+The eval runner generates `max(k)` completions per sample and computes the pass@k estimates from those.
+
+## Standalone eval driver
+
+For evaluating checkpoints outside of training, Telescope includes a standalone eval driver that loads checkpoints, spins up vLLM inference, runs evals, and logs results to Weights & Biases. It is config-file-driven, like training:
+
+```bash
+uv run eval --config eval_run.yaml
+```
+
+You can override any config parameter from the command line:
+
+```bash
+uv run eval --config eval_run.yaml --max_model_len 8000
+```
+
+The standalone driver converts native checkpoints to HuggingFace format on the fly (if not already converted), evaluates each checkpoint in step order, and uploads results to the specified W&B run.

@@ -1,0 +1,26 @@
+---
+title: "Runs"
+---
+
+The sidebar is where you manage all your training runs.
+
+## Adding runs
+
+Telescope automatically discovers runs tagged with `telescope` in your W&B projects. If you've previously removed a run, you can re-add it via the **Add Run** option in the sidebar menu.
+
+## Run states
+
+- **Live** (green dot) — the run is live and being actively monitored
+- **Syncing** (blue dot) — data is currently being downloaded from W&B
+
+## Run actions
+
+Hovering over a run reveals a menu icon that gives you:
+
+- **Force Full Resync** — deletes all local data for the run and re-downloads everything from scratch
+- **Sync Evals After Training** — manually fetch evaluation data after training has completed
+- **Remove** — removes the run from the sidebar
+
+## Customization
+
+Each run has an assigned color used in charts. You can change it by clicking the color dot next to the run name. The search bar lets you filter runs by name or ID, or by config values using the `config:` prefix (e.g. `config:learning_rate=5e-7`).

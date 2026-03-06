@@ -1,0 +1,106 @@
+---
+title: "Troubleshooting"
+---
+
+Solutions for common training issues. For performance and throughput problems, see [Performance Tuning](/training/performance).
+
+## Training instability
+
+### Reward collapse or divergence
+
+The model's rewards suddenly drop or diverge. There are many possible causes — the policy changing too much in a single step, logprob discrepancies between inference and training engines due to async training, entropy collapse, the model falling into repetitive patterns, hyperparameters not well tuned, or a combination of these.
+
+RL training requires a lot of investigation, and the [Telescope UI](/training/visualization) is very helpful for this — you can inspect individual rollouts, track reward distributions over time, and see exactly what the model is generating.
+
+Some general approaches:
+
+- **Lower the learning rate.** RL training is more sensitive to LR than supervised fine-tuning. Start at `1e-6` and go lower if needed. Use `warmup_steps: 10` for a gradual start.
+- **Enable PPO clipping.** Constrains how much the policy can change per step:
+  ```yaml
+  use_ppo_clip: true
+  clip_low: 0.4   # ratio lower bound: 0.6
+  clip_high: 0.5  # ratio upper bound: 1.5
+  ```
+- **Increase group size.** Larger groups (e.g., `group_size: 16`) produce more stable advantage estimates since there are more samples to compute the baseline from.
+- **Try RLOO instead of GRPO.** RLOO uses a leave-one-out baseline that's less sensitive to reward outliers. See [Algorithms](/training/algorithms).
+
+### Async training instability
+
+Instability is very common with async training. When `max_async_rollout` > 0, the inference servers generate samples using older weights than what the trainer is optimizing. The higher the async level, the more off-policy the rollouts become, and the larger the logprob discrepancy between what inference computed and what the trainer sees.
+
+**TIS and PPO clipping are the main tools here:**
+
+- **Enable TIS** — truncated importance sampling corrects for the weight mismatch:
+  ```yaml
+  use_tis: true
+  tis_cap: 2.0
+  ```
+- **Enable PPO clipping** — prevents the policy from moving too far from the rollout distribution in a single step.
+- **Lower `max_off_policy_steps`** — cancel rollouts generated with very old weights sooner (e.g., `4` instead of `8`).
+- **Reduce `max_async_rollout`** — less overlap means more on-policy rollouts at the cost of throughput. Try `1` instead of `2`, or go fully synchronous with `0`.
+
+### No learning signal
+
+Rewards stay flat and the model isn't improving.
+
+- **Are all rewards identical?** If every sample in a group gets the same reward, the advantage is zero and there's nothing to learn from. `discard_group_zero_advantage: true` (the default) filters these out, but if most groups have zero advantage, the effective batch size becomes very small. Try increasing `group_size` so there's more variance within each group.
+- **Is the reward too sparse?** If only a few samples get non-zero reward, learning is very slow. Consider adding partial credit in your reward function (e.g., format rewards, intermediate correctness signals). See [Reward Design](/training/reward-design).
+- **Is the model too small for the task?** Some smaller models tend to collapse and can't pass certain capability thresholds regardless of training. If the model can't solve any samples before training, RL won't help — it needs at least some signal to learn from.
+- **Is the task too narrow?** If the task is too constrained, the model may try the same pattern repeatedly without generalizing. Diverse prompts and multi-environment training can help.
+
+## Common errors
+
+### Config validation errors
+
+Telescope uses strict config validation (`extra="forbid"`). Common issues:
+
+- **Typos in parameter names** — any unrecognized parameter raises an error. Check the [Config Reference](/training/config) for exact names.
+- **Incompatible combinations** — some config options conflict:
+  - `use_tis` and `use_ppo_clip` cannot both be used with rollout-based reference logprobs
+  - `use_ppo_clip` is not compatible with CISPO, GSPO, or SAPO (they have built-in ratio handling)
+  - `advantage_norm: "batch"` is incompatible with RLOO and DR-GRPO
+
+### NCCL errors
+
+**Multi-node:** Usually a network interface issue. Ensure:
+- The correct network interface is accessible between nodes
+- Required ports are open (NCCL uses a range of ports)
+- Shared memory is configured: `--ipc=host --shm-size=16g` in Docker
+
+**Single-node:** Often shared memory (`/dev/shm`) is too small. Set `--shm-size` to at least 16GB in Docker.
+
+### Out of memory
+
+**Trainer OOM:** See [Performance Tuning — Trainer memory](/training/performance#trainer-memory) for systematic diagnosis.
+
+**vLLM startup OOM:** The model + initial KV cache don't fit. Lower `gpu_memory_utilization`, reduce `max_model_len`, or increase `inference_tensor_parallel_size`.
+
+**During weight broadcast:** If OOM happens during weight sync from trainer to inference servers, try `weight_broadcast_free_grad_buffers: true` (Megatron) or reduce the number of concurrent broadcasts.
+
+### vLLM server not starting
+
+- **Port conflicts** — check `inference_base_port` (default 8100). Each server uses consecutive ports.
+- **Model not found** — ensure the model path is correct and accessible. For gated models, set the HuggingFace token.
+- **CUDA version mismatch** — vLLM requires specific CUDA versions. Check vLLM's compatibility matrix.
+
+## FAQ
+
+### How do I pick the right model size for my GPU count?
+
+Start with a model that fits in a single training backend configuration. For FSDP, the model must fit across all trainer GPUs (FSDP shards weights across them). For Megatron, use TP/PP to shard across GPUs. As a rough guide, each billion parameters needs ~2 GB in bfloat16 for weights alone, plus ~8 GB for Adam optimizer states (two fp32 copies of momentum and variance). These totals are divided across trainer GPUs since both FSDP and Megatron shard them.
+
+### How do I know if async training is hurting quality?
+
+Compare a short run at `max_async_rollout: 0` (synchronous) vs your async setting. If the synchronous run shows better reward curves, async is introducing too much off-policy error. Enable TIS and PPO clipping, or reduce the async level.
+
+### Can I use a custom chat template?
+
+Telescope uses the tokenizer's `apply_chat_template()` by default. If your model has a custom template, ensure it's included in the tokenizer configuration (usually `tokenizer_config.json`). You can also override `format_prompt()` in your environment for full control.
+
+### How do I train on multiple tasks at once?
+
+Use multi-environment training — list multiple environments with weights in your config. See [Environments — Multi-environment training](/training/environments#multi-environment-training).
+
+### What if my environment needs async I/O?
+
+Environments can use async I/O (e.g., for API calls or sandbox execution). The environment methods (`env_response`, `compute_reward`) support async patterns. The sandbox system is fully async. See [Tool Calling — Sandbox execution](/training/tool-calling#sandbox-execution) for details.

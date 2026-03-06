@@ -1,0 +1,30 @@
+---
+title: "Telescope"
+mode: "custom"
+---
+
+<div className="flex flex-col items-center justify-center pt-16 pb-12 text-center space-y-6">
+  <img src="/logo/telescope-full.svg" alt="Telescope" className="h-14 dark:hidden" noZoom />
+  <img src="/logo/telescope-full-dark.svg" alt="Telescope" className="h-14 hidden dark:block" noZoom />
+
+  <p className="max-w-xl text-base text-gray-600 dark:text-zinc-400 leading-relaxed">
+    A framework for post-training large language models with reinforcement learning, designed for reasoning and agentic capabilities.
+  </p>
+</div>
+
+<div className="max-w-2xl mx-auto">
+  <CardGroup cols={2}>
+    <Card
+      title="Training"
+      href="/training/installation"
+    >
+      Set up and run RL post-training with FSDP or Megatron training engines and vLLM inference. Designed for GPU clusters.
+    </Card>
+    <Card
+      title="UI Visualization"
+      href="/visualization/installation"
+    >
+      Monitor training runs, inspect rollouts, and analyze metrics locally with the Telescope UI.
+    </Card>
+  </CardGroup>
+</div>

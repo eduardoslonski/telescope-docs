@@ -1,0 +1,11 @@
+---
+title: "Database"
+---
+
+All training data synced from W&B is stored in a local DuckDB database at `~/.telescope/`. You can change this location with the `TELESCOPE_DATA_DIR` environment variable.
+
+## Compression
+
+Over time the database can grow large. The **Database** option in the sidebar menu shows the current database size and lets you compress it. Compression can reduce size by 20–30% depending on the data, by re-exporting and re-importing the database with optimized storage.
+
+During compression, syncs are paused automatically and resume when it finishes.

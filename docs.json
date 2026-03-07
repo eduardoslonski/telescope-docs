@@ -18,7 +18,7 @@
             "pages": [
               "training/installation",
               "training/examples",
-              "training/features"
+              "training/config"
             ]
           },
           {
@@ -28,9 +28,10 @@
               "training/async-training",
               "training/algorithms",
               "training/environments",
-              "training/reward-design",
+              "training/metrics",
               "training/data-preparation",
-              "training/tool-calling"
+              "training/tool-calling",
+              "training/features"
             ]
           },
           {
@@ -41,7 +42,6 @@
               "training/evals",
               "training/visualization",
               "training/performance",
-              "training/config",
               "training/troubleshooting"
             ]
           }

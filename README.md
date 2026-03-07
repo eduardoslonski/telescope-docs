@@ -32,7 +32,7 @@ training/           # Training engine docs
   async-training    # Async rollout generation
   algorithms        # GRPO, RLOO, REINFORCE++, DR-GRPO, CISPO, GSPO, SAPO
   environments      # Single-turn, multi-turn, custom environments
-  reward-design     # Multi-component rewards, normalization
+  metrics           # Training metrics, sample metrics, reward tracking
   data-preparation  # Dataset format and loading
   tool-calling      # Agentic training with sandbox execution
   checkpointing     # Save, resume, HuggingFace conversion

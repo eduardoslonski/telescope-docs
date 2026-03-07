@@ -1,0 +1,170 @@
+---
+title: "Metrics"
+---
+
+Telescope tracks two kinds of metrics during training, both visible in real time on the [Metrics page](/visualization/metrics).
+
+**Step metrics** are logged once per training step. By default Telescope logs entropy, KL divergence, gradient norm, and learning rate. You can add your own by returning extra keys from `train_step()` using a `section/group/metric` naming convention (e.g., `custom/loss/auxiliary`), and they will automatically appear as charts organized by their section and group.
+
+**Sample metrics** are logged per sample from your environment's `compute_reward()`. You can return anything — reward components, response length, number of reasoning steps, tool call counts, time spent computing the reward — via the `sample_metrics` dict in `RewardResult`. The UI aggregates them per step into mean, std, min, and max.
+
+Both kinds of metrics support **range declarations**. `reward_min` / `reward_max` set the expected reward range per environment. `metrics_ranges` on the environment class sets expected ranges for individual sample metrics. These declarations don't affect training — they only tell the UI the effective min and max so charts can be normalized to a meaningful scale. When ranges are not declared, the observed min/max from the run's data is used instead.
+
+## Step metrics
+
+The trainer backend returns a metrics dictionary from `train_step()` every step. By default this includes:
+
+| Key | Description |
+|-----|-------------|
+| `entropy` | Policy entropy over masked token positions |
+| `kl_divergence_inference` | KL divergence between the current policy and the rollout policy (from vLLM logprobs) |
+| `grad_norm` | Gradient norm (averaged across minibatch groups) |
+| `learning_rate` | Current learning rate from the scheduler |
+
+Keys use `/` as a delimiter to create a section/group/metric hierarchy. Keys without `/` (like the defaults above) are placed under a **General** section. Keys with one `/` (e.g., `loss/policy`) become section=`loss`, metric=`policy`. Keys with two or more `/` (e.g., `timing/forward/total`) become section=`timing`, group=`forward`, metric=`total`.
+
+You can log additional step metrics by returning extra keys from `train_step()` in a custom backend:
+
+```python
+def train_step(self, trainer_data: dict) -> dict:
+    metrics = super().train_step(trainer_data)
+    metrics["custom/my_metric"] = some_value       # section="custom", metric="my_metric"
+    metrics["debug/grads/layer_norm"] = other_value # section="debug", group="grads", metric="layer_norm"
+    return metrics
+```
+
+Step metrics appear in the Metrics page organized into their sections and groups. The **Custom** view lets you build your own dashboard layout by creating sections, adding metrics from the catalog, and reordering with drag-and-drop. The layout persists across sessions.
+
+## Sample metrics
+
+Environments return per-sample metrics alongside the total reward via the `sample_metrics` field of `RewardResult`.
+
+```python
+def compute_reward(self, completion: str, sample: Sample, eos_token: str = "") -> RewardResult:
+    is_correct = check_answer(completion, sample.answer)
+    return RewardResult(
+        total_reward=float(is_correct),
+        sample_metrics={
+            "correct": float(is_correct),
+            "reasoning_steps": count_steps(completion),
+            "response_words": len(completion.split()),
+            "reward_compute_time": elapsed,
+        },
+    )
+```
+
+No pre-registration is required — any key you include in `sample_metrics` is automatically tracked. The UI aggregates them per step (mean, std, min, max) and computes a Gini coefficient per prompt group, measuring how concentrated the metric values are within each group.
+
+### Tool metrics
+
+For tool-calling environments, `get_tool_metrics(state)` returns a dict with tool usage stats that can be merged into `sample_metrics`:
+
+```python
+{
+    "total_tool_calls": 3,
+    "tool_success_count": 2,
+    "tool_error_count": 1,
+    "tool_success_rate": 0.67,
+    "unique_tools_used": 2,
+    "add_calls": 2,
+    "subtract_calls": 1,
+}
+```
+
+See [Tool Calling](/training/tool-calling) for details.
+
+## Ranges
+
+### Reward ranges
+
+`reward_min` and `reward_max` declare the expected reward range for an environment. These don't affect training — they tell the UI the effective bounds so reward charts are normalized to a meaningful scale. This is especially useful when training with multiple environments whose rewards have different scales (e.g., 0–2 for one, 0–1 for another).
+
+```yaml
+environments:
+  - name: "countdown"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 2.0
+  - name: "hendrycks_math"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 1.0
+```
+
+### Metrics ranges
+
+`metrics_ranges` declares expected ranges for individual sample metrics. Like reward ranges, these don't affect training — they tell the UI the effective bounds so each sample metric chart is normalized to a meaningful scale.
+
+```python
+class MyEnvironment(BaseEnvironment):
+    metrics_ranges = {
+        "correct": {"min": 0.0, "max": 1.0},
+        "reasoning_steps": {"min": 0.0, "max": 20.0},
+    }
+```
+
+When neither `reward_min`/`reward_max` nor `metrics_ranges` are set, the observed min/max from the run's data is used instead.
+
+## Reward
+
+The total reward for each sample comes from `RewardResult.total_reward` returned by the environment's `compute_reward()`. The UI computes per-step statistics (mean, std, min, max) from all samples in each training step.
+
+The UI also computes a Gini coefficient per prompt group and averages it — it measures reward sparsity (0 = all samples got the same reward, 1 = extreme concentration).
+
+## Advantage
+
+The UI shows per-step advantage statistics (mean, std, min, max). How advantages are normalized depends on the algorithm — see [Algorithms](/training/algorithms).
+
+## Rollouts
+
+The UI computes token length distributions from the prompts and completions in each step (mean, std, min, max for each):
+
+- **Tokens (Prompt)** — prompt token counts
+- **Tokens (Completion)** — completion token counts (sum across turns for multi-turn)
+- **Tokens (Total)** — total tokens per sample
+
+Additional metrics:
+
+| Metric | Description |
+|--------|-------------|
+| `stop_reason_length_pct` | Percentage of samples that hit the token length limit. A high value may indicate that `max_token_len` is too low. |
+| `group_length_gini_mean` | Gini coefficient of completion lengths within prompt groups, averaged across groups. Measures within-group length inequality. |
+| `group_length_max_median_ratio_mean` | Max/median ratio of completion lengths within prompt groups, averaged across groups. A straggler indicator — values close to 1 mean completions are roughly equal length. |
+
+## Discarded rollouts
+
+Metrics for rollouts that were discarded and not used for training.
+
+Rollouts can be discarded for two reasons:
+- **max_async** — the rollout was generated with weights that are too many steps behind (`max_off_policy_steps`)
+- **zero_advantage** — all samples in the group received the same reward, so the advantage is zero (controlled by `discard_group_zero_advantage`)
+
+Tracked metrics include discard counts and percentages by reason, a zero-advantage breakdown (all rewards = 0 vs all rewards > 0 vs mean reward), canceled rollouts, and token length distributions for discarded samples.
+
+## Timeline
+
+Step timing breakdowns from the trainer's GPU timeline. The first step is typically much slower due to compilation.
+
+**Full step (total time per operation):**
+
+| Metric | Description |
+|--------|-------------|
+| `timing_step_total` | Total wall time per training step |
+| `timing_step_active` | Active time excluding waiting for data |
+| `timing_forward_total` | Total forward pass time |
+| `timing_backward_total` | Total backward pass time |
+| `timing_loss_computation_total` | Loss computation time |
+| `timing_compute_kl_total` | KL divergence computation time |
+| `timing_compute_entropy_total` | Entropy computation time |
+| `timing_data_to_device_total` | Time moving data to GPU |
+| `timing_prepare_tensors_total` | Tensor preparation time |
+| `timing_waiting_for_data` | Time spent waiting for rollout data |
+| `timing_weight_sync_trainer_total` | Weight sync time (trainer side) |
+| `timing_weight_sync_inference_total` | Weight sync time (inference side) |
+
+**Per microbatch (mean time):** same operations as above averaged per microbatch (e.g., `timing_forward_microbatch_mean`).
+
+## W&B scalar metrics
+
+Step metrics are also logged to W&B as scalar metrics (via `wandb.log()`), so they appear as charts in the W&B dashboard. This is useful for quick debugging.
+

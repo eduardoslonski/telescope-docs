@@ -44,7 +44,7 @@ Instability is very common with async training. When `max_async_rollout` > 0, th
 Rewards stay flat and the model isn't improving.
 
 - **Are all rewards identical?** If every sample in a group gets the same reward, the advantage is zero and there's nothing to learn from. `discard_group_zero_advantage: true` (the default) filters these out, but if most groups have zero advantage, the effective batch size becomes very small. Try increasing `group_size` so there's more variance within each group.
-- **Is the reward too sparse?** If only a few samples get non-zero reward, learning is very slow. Consider adding partial credit in your reward function (e.g., format rewards, intermediate correctness signals). See [Reward Design](/training/reward-design).
+- **Is the reward too sparse?** If only a few samples get non-zero reward, learning is very slow. Consider adding partial credit in your reward function (e.g., format rewards, intermediate correctness signals). See [Metrics](/training/metrics).
 - **Is the model too small for the task?** Some smaller models tend to collapse and can't pass certain capability thresholds regardless of training. If the model can't solve any samples before training, RL won't help — it needs at least some signal to learn from.
 - **Is the task too narrow?** If the task is too constrained, the model may try the same pattern repeatedly without generalizing. Diverse prompts and multi-environment training can help.
 

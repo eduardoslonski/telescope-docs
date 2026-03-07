@@ -85,7 +85,7 @@ Run the same Docker container on each node, then start Ray inside:
 ```bash
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --network=host \
-  --ulimit memlock=-1 --ulimit stack=67108864 \
+  --ulimit memlock=-1 --ulimit stack=67108864 --ulimit nofile=65536:65536 \
   -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
 
 # Inside the container:
@@ -97,7 +97,7 @@ ray start --head --num-gpus=8 --port=6379
 ```bash
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --network=host \
-  --ulimit memlock=-1 --ulimit stack=67108864 \
+  --ulimit memlock=-1 --ulimit stack=67108864 --ulimit nofile=65536:65536 \
   -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
 
 # Inside the container:

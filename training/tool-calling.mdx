@@ -25,7 +25,7 @@ def subtract(a: float, b: float) -> float:
 Pass them to the constructor:
 
 ```python
-class CalculatorEnvironment(ToolEnvironment):
+class MyToolEnvironment(ToolEnvironment):
     def __init__(self, **kwargs):
         super().__init__(
             tools=[add, subtract, multiply, divide],
@@ -191,7 +191,7 @@ Telescope is agnostic to which sandbox provider is used — any provider that im
 
 ### Using sandboxes in environments
 
-The `mini_swe_agent_plus` environment demonstrates the full pattern:
+A typical sandbox environment follows this pattern:
 
 1. **Create sandboxes** in `create_initial_state()` with concurrency control via semaphores
 2. **Execute commands** in `env_response()` by parsing tool calls and running them in the sandbox

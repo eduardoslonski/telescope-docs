@@ -134,7 +134,7 @@ def get_initial_prompt(self, sample):
     ]
 ```
 
-For environments that need per-sample system prompts (e.g., ACEBench where each sample has its own API documentation), override this method:
+For environments that need per-sample system prompts (e.g., where each sample has its own documentation or context), override this method:
 
 ```python
 def get_initial_prompt(self, sample):

@@ -100,7 +100,7 @@ The format reward teaches the model to use `<think>` and `<answer>` tags even be
 
 ### Tool-use rewards
 
-For tool environments, you can reward not just correctness but how the model uses tools. The Calculator environment combines three components:
+For tool environments, you can reward not just correctness but how the model uses tools. For example, a tool-using environment might combine correctness, efficiency, and format:
 
 ```python
 def compute_reward(self, state, eos_token=""):
@@ -135,33 +135,21 @@ Requiring at least one tool call for correctness prevents the model from bypassi
 
 ### Process rewards (multi-turn)
 
-For multi-turn tasks, you can reward the quality of intermediate steps, not just the final outcome. ACEBench uses two complementary metrics:
+For multi-turn tasks, you can reward the quality of intermediate steps, not just the final outcome. For example, a multi-turn environment might track both end-to-end correctness and process quality:
 
 ```python
 def compute_reward(self, state, eos_token=""):
-    info = state.sample.metadata
+    # End-to-end: did the model reach the correct final state?
+    e2e = compute_end_to_end_score(state)
 
-    # End-to-end: does final API state match ground truth?
-    e2e = _compute_end_to_end_score(
-        api_instances=state.custom["api_instances"],
-        saved_class_keys=info["SAVED_CLASS"],
-        ground_truth_raw=info["ground_truth"],
-        checker_func=self._checker_func,
-    )
-
-    # Process: how well does the tool call sequence match the milestone path?
-    process = _compute_process_score(
-        tool_call_history=state.custom["tool_call_history"],
-        mile_stone=info["mile_stone"],
-        e2e_score=e2e,
-    )
+    # Process: how efficient was the model's trajectory?
+    process = compute_process_score(state)
 
     return RewardResult(
         total_reward=e2e,  # end-to-end is the sole training signal
         sample_metrics={
             "end_to_end_reward": e2e,
             "process_reward": process,      # tracked for analysis, not used in loss
-            "tool_calls_count": float(len(state.custom["tool_call_history"])),
         },
     )
 ```

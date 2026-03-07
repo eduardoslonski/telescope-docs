@@ -77,7 +77,7 @@ Telescope can be installed via **Docker** (recommended), which comes with everyt
     ```
 
     <Warning>
-      Installing from source does not include Transformer Engine or NVIDIA Apex. These are pre-built in the Docker image and require complex compilation from source. Training will still work, but the Docker image is recommended for best performance.
+      Installing from source does not include some performance libraries (Transformer Engine, NVIDIA Apex) that are pre-built in the Docker image and require complex compilation from source. Training will still work fine, just without the accelerated performance those provide.
     </Warning>
   </Tab>
 </Tabs>

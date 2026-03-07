@@ -30,7 +30,7 @@ Telescope can be installed via **Docker** (recommended), which comes with everyt
       `--ipc=host` and `--shm-size=16g` are required for NCCL shared memory across GPUs. `--ulimit memlock=-1` unlocks GPU memory pinning for efficient transfers. Platforms like Vast.ai and RunPod handle these flags automatically when using their template system.
     </Note>
 
-    The Telescope source code is located at `/workspace/telescope` inside the container.
+    The Telescope source code is located at `/root/telescope` inside the container.
 
     ### Set up Weights & Biases
 

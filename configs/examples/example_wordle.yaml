@@ -1,5 +1,4 @@
 # Wordle: multi-turn interactive word guessing game
-# Adapted from https://app.primeintellect.ai/dashboard/environments/will/wordle
 # Demonstrates the multi-turn environment loop.
 # Install: uv add textarena
 #

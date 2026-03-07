@@ -1,5 +1,4 @@
 # Code generation with sandboxed test execution
-# Adapted from https://app.primeintellect.ai/dashboard/environments/primeintellect/code-env
 #
 # Requires a sandbox provider — install the one you want to use:
 #   uv add daytona-sdk     (Daytona)

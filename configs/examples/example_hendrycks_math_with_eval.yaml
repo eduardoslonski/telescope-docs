@@ -1,5 +1,4 @@
 # Hendrycks MATH training with periodic eval on MATH-500 and hendrycks_math
-# Adapted from https://app.primeintellect.ai/dashboard/environments/primeintellect/hendrycks-math
 # Install: uv add math-verify
 #
 # Usage: uv run train.py --config configs/examples/example_hendrycks_math_with_eval.yaml

@@ -1,5 +1,4 @@
 # Countdown: create equations from numbers to reach a target
-# Adapted from https://github.com/Jiayi-Pan/TinyZero
 # Good first example — simple, fast, no extra dependencies.
 #
 # Usage: uv run train.py --config configs/examples/example_countdown.yaml

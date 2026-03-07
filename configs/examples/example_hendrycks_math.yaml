@@ -1,5 +1,4 @@
 # Hendrycks MATH: competition-level math problems
-# Adapted from https://app.primeintellect.ai/dashboard/environments/primeintellect/hendrycks-math
 # Install: uv add math-verify
 #
 # Usage: uv run train.py --config configs/examples/example_hendrycks_math.yaml

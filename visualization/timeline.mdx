@@ -1,0 +1,36 @@
+---
+title: "Timeline"
+---
+
+The Timeline page visualizes what every component of the system is doing over time — the orchestrator, inference servers, and trainer GPUs — so you can see how they overlap and where bottlenecks occur.
+
+The view is divided into time intervals that you paginate through.
+
+## Inference servers
+
+One section per inference server, showing concurrent requests as horizontal bars across lanes. Each bar represents a single inference request, color-coded by type (regular, eval, discarded, canceled).
+
+You can toggle overlays for **weight update** and **compute reward** segments on each request bar, and **highlight discarded** samples to visually separate them.
+
+Clicking a request opens a detail panel at the bottom showing all samples in that group — their inference times, environment response times, and compute reward/metrics durations — so you can see exactly how a group was processed.
+
+## Orchestrator
+
+A single lane showing cluster-wide events like weight updates, batch saves, and inference server initialization. You can click legend items to highlight specific event types.
+
+## Trainer
+
+One section per trainer GPU rank, showing operations like forward pass, backward pass, loss computation, optimizer step, and weight broadcast as colored bars. When there are more than 8 GPU ranks, they are paginated into groups of 8 with a dropdown to switch between pages. You can spot idle gaps and see how operations overlap across ranks.
+
+You can select GPU metrics (e.g. `torch_allocated_gb`) to display as line charts below each rank's timeline.
+
+Clicking a trainer event shows a **breakdown** of its sub-operations with durations and percentage of the parent event, useful for understanding where time is spent within a training step.
+
+## Identifying bottlenecks
+
+The timeline makes it easy to spot common issues:
+
+- **Long idle gaps** in the trainer lane indicate the trainer is waiting for data from inference
+- **Stacked inference lanes** show how much concurrency each server is handling
+- **Weight broadcast bars** show how long inference servers are blocked receiving new weights
+- **Discarded samples** (when highlighted) reveal how much compute is being wasted on stale rollouts

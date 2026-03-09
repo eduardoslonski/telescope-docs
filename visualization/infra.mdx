@@ -1,0 +1,23 @@
+---
+title: "Infra"
+---
+
+The Infra page shows the hardware and system-level state of the cluster. It has three tabs: **Metrics**, **Topology**, and **Model**.
+
+## Metrics
+
+Time-series charts for GPU, CPU, and vLLM metrics across the cluster, organized into sections:
+
+- **GPU metrics** — utilization, memory usage, temperature, power draw, and PyTorch-level metrics like `torch_allocated_gb`, per GPU. You can filter by role (trainer vs inference) and group by node
+- **CPU metrics** — CPU utilization and system memory usage per node
+- **vLLM metrics** — per-server stats like requests running/waiting, KV cache usage, token throughput, and latencies
+
+A **Live** mode keeps the view pinned to the most recent data. You can also enable **Aggregate** smoothing to average metrics over a configurable time window, useful for reducing noise on high-frequency metrics.
+
+## Topology
+
+A visual map of the cluster showing every node, its GPUs, and which role each GPU is assigned to (trainer or inference). This gives you a quick overview of how resources are distributed across the cluster, including hardware details like GPU model, memory, CUDA/PyTorch/Python versions, and interconnect info.
+
+## Model
+
+A visualization of the model architecture, showing the layer structure and parameter layout. Useful for understanding the model you're training at a glance.

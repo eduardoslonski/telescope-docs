@@ -1,0 +1,119 @@
+---
+title: "Performance Tuning"
+---
+
+How to diagnose and fix throughput and memory bottlenecks during training.
+
+The best starting point is the [Telescope UI](/training/visualization), specifically the **Timeline** page — it shows exactly where time is spent (inference, training, waiting) and surfaces metrics like waiting-for-batch time, discarded count, and canceled count.
+
+## GPU memory
+
+### Trainer memory
+
+The trainer holds model weights, optimizer states (2-3x the model size for Adam), gradients, and activation memory from the forward/backward pass. The main variables that affect trainer memory:
+
+- **Model size** — larger models need more memory for weights + optimizer
+- **Sequence length** (`seq_len`) — longer packed sequences produce larger activation tensors
+- **Batch size** (`prompts_batch_size_for_trainer`) — more samples packed per step means more activations
+
+If the trainer runs out of memory, first determine whether the problem is **activations** (scales with `seq_len` and `prompts_batch_size_for_trainer`) or **model/optimizer states** (scales with model size and is constant regardless of batch).
+
+**If activations are the bottleneck** (common with long sequences or large batches):
+
+- Reduce `seq_len` — the single biggest lever. Set it to match the max context length for your generations rather than leaving it unnecessarily high.
+- Reduce `prompts_batch_size_for_trainer` — smaller batches use less activation memory but can produce noisier gradients.
+- Enable gradient checkpointing — recomputes activations during the backward pass instead of storing them, saving significant memory at the cost of more compute. Enabled by default for FSDP; for Megatron set `megatron_gradient_checkpointing: true`.
+
+**If model/optimizer states are the bottleneck** (common with large models on limited GPUs):
+
+For **FSDP**, the model is already sharded across all trainer GPUs. If it still doesn't fit, you need more trainer GPUs or should switch to Megatron.
+
+For **Megatron**, you have several options that trade off memory vs. compute or complexity:
+
+| Technique | What it does | Cost | Config |
+|-----------|-------------|------|--------|
+| Distributed optimizer | Shards optimizer across DP ranks | None (free win if DP > 1) | `megatron_use_distributed_optimizer: true` |
+| BF16 gradient reduction | Halves grad buffer memory (fp32 → bf16) | Slightly less precise gradients | `megatron_grad_reduce_in_fp32: false` |
+| Free grad buffers during broadcast | Temporarily frees grad buffers during weight sync | None | `weight_broadcast_free_grad_buffers: true` |
+| CPU optimizer offload | Moves optimizer states to CPU | D2H/H2D transfer overhead | `megatron_optimizer_cpu_offload: true` |
+| FP8 compute | Reduces activation and compute memory | Requires H100 + Transformer Engine | `megatron_fp8: true` |
+| Increase TP/PP | Shards model across more GPUs | More communication, uses more GPUs | `megatron_tensor_parallel_size`, `megatron_pipeline_parallel_size` |
+
+Start with the distributed optimizer (it's free if you have DP > 1), then try BF16 grad reduction and freeing grad buffers. CPU offload and increased parallelism are last resorts.
+
+### Inference memory
+
+vLLM handles memory management internally — it won't OOM, as it manages the KV cache with queuing and scheduling. However, if there isn't enough GPU memory beyond the model weights for the KV cache, vLLM will queue and throttle requests, making inference slower.
+
+The main things to check:
+
+- **`gpu_memory_utilization`** — fraction of GPU memory vLLM can use (default `0.9`). Lowering it gives less KV cache space; raising it gives vLLM more room.
+- **`max_model_len`** — determines the maximum KV cache entries. If your generations are shorter than this, lower it to reduce KV cache allocation.
+- **`inference_tensor_parallel_size`** — shards the model across multiple GPUs per server, giving each server more total memory for the KV cache.
+
+If you see high queue times or preemptions in the vLLM metrics, the servers don't have enough KV cache space for the concurrency level — either reduce `max_concurrent_prompts_per_server` or give the servers more memory through TP.
+
+## Throughput optimization
+
+### When inference is the bottleneck
+
+If the trainer is idle waiting for rollouts (visible in the timeline as gaps between training steps, or high waiting-for-batch time):
+
+- **Add more inference servers** (`inference_num_workers`) — more servers means more parallel rollout generation.
+- **Increase tensor parallelism for inference** (`inference_tensor_parallel_size`) — shards the model across GPUs per server, reducing per-request latency. Going from TP=1 to TP=2 often significantly speeds up generation for larger models.
+- **Tune `max_concurrent_prompts_per_server`** — controls how many requests each vLLM server handles simultaneously. Be careful: sending too many requests can lead to worse results due to KV cache pressure, especially in multi-turn environments.
+- **Reduce `max_tokens`** — if completions are much shorter than the max, you're over-allocating.
+
+### When training is the bottleneck
+
+If inference servers are idle and rollouts are piling up (visible in the timeline as the trainer always busy with no idle gaps):
+
+- **Increase `max_async_rollout`** — let inference run further ahead so it's never blocked waiting for the trainer.
+- **Increase `prompts_batch_size_for_trainer`** — larger batches amortize the fixed overhead of optimizer steps and weight broadcast. Increase as much as memory allows.
+- **Use minibatches** — run multiple gradient steps per rollout batch to extract more learning without increasing memory:
+  ```yaml
+  number_of_minibatches: 4
+  use_ppo_clip: true  # recommended with multiple minibatches
+  ```
+
+### Other efficiency tips
+
+- **Prompt prefetch** (default: on) — pre-tokenizes prompts in the background. Helpful in environments where prompt preparation takes time.
+- **Individual sample lanes** — `enable_individual_sample_lanes: true` gives each sample its own concurrency slot instead of one per group, improving throughput for environments with high variance in completion time.
+- **`PACK` placement** (default) — colocates workers on the same node so NCCL communication uses NVLink instead of cross-node networking.
+
+## Advanced techniques
+
+### FP8 training
+
+On Hopper GPUs (H100), the Megatron backend supports FP8 compute via Transformer Engine:
+
+```yaml
+train_backend: "megatron"
+megatron_use_transformer_engine: true
+megatron_fp8: true
+```
+
+FP8 reduces both activation memory and compute time. Requires Hopper GPUs and the Transformer Engine library.
+
+### Sequence packing
+
+Multiple samples are packed into a single sequence up to `seq_len` tokens. Right-sizing this parameter matters:
+
+- **Too high** — wastes memory on activations for unused context length
+- **Too low** — truncates completions and reduces sample quality
+
+Set `seq_len` close to the expected maximum completion length for your task. Use `pad_to_multiple_of` to align to hardware-friendly sizes.
+
+### Gradient checkpointing
+
+Recomputes activations during the backward pass instead of storing them, saving ~15-20 GB of GPU memory at the cost of additional compute.
+
+- **FSDP** — enabled by default
+- **Megatron** — `megatron_gradient_checkpointing: true`
+
+## Balancing inference and trainer GPUs
+
+There's no universal formula — the right split depends on how fast inference can produce batches and how fast the trainer can consume them. Batch production speed depends on generation throughput, how many rollouts get discarded (zero advantage, stale cancellations), group size, and sequence length. Trainer consumption speed depends on batch size, model size, parallelism, and whether you're using minibatches.
+
+Watch the timeline in the UI: if one side is consistently idle waiting for the other, move GPUs to the bottleneck side. The key metrics are waiting-for-batch time (trainer waiting for inference) and the number of queued/in-flight rollouts (inference outpacing trainer).

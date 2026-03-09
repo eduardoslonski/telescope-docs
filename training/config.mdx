@@ -1,0 +1,331 @@
+---
+title: "Config"
+---
+
+Telescope uses a flat, Pydantic-validated configuration schema. Every field name is globally unique and self-descriptive. Typos in YAML keys are caught at load time (`extra="forbid"`).
+
+## Config loading
+
+Configuration is resolved by merging three layers:
+
+1. **Defaults** — `configs/defaults/default_train.yaml` (ships with Telescope)
+2. **Run config** — your YAML file passed via `--config`
+3. **CLI overrides** — individual flags like `--learning_rate 5e-7`
+
+Later layers override earlier ones. You only need to specify the fields you want to change.
+
+```bash
+uv run train.py --config configs/my_run.yaml --learning_rate 5e-7
+```
+
+---
+
+## Summary
+
+The most commonly configured parameters for a training run:
+
+```yaml
+# Model
+model: "Qwen/Qwen2.5-7B"        # HuggingFace model ID or local path
+model_dtype: "bfloat16"         # model weight precision
+
+# Environments
+environments:
+  - name: "hendrycks_math"      # registered environment name
+    weight: 1.0                 # sampling weight for multi-env training
+    reward_min: 0.0             # expected min reward (for UI charts)
+    reward_max: 1.0             # expected max reward (for UI charts)
+
+# Workers
+inference_num_workers: 4        # number of vLLM inference servers
+trainer_num_workers: 4          # number of FSDP/Megatron trainer workers
+
+# Training
+algorithm: "grpo"               # RL algorithm (grpo, rloo, reinforce_pp, dr_grpo, cispo, gspo, sapo)
+group_size: 8                   # completions sampled per prompt
+learning_rate: 1.0e-6           # optimizer learning rate
+prompts_batch_size_for_trainer: 16      # number of groups per training batch
+number_of_steps: 300            # total training steps
+
+# Sampling
+temperature: 1.0                # sampling temperature
+max_tokens: 3700                # max generation tokens per completion
+seq_len: 4096                   # max sequence length for packing
+
+# Async
+max_async_rollout: 2            # how many steps inference can run ahead (0 = synchronous)
+
+# Checkpointing
+checkpoint_every: 50            # save a checkpoint every N steps
+
+# Logging
+wandb_project: "my-project"    # Weights & Biases project name
+wandb_run_name: "my-run"       # Weights & Biases run name
+```
+
+For the full list of parameters, see the sections below.
+
+---
+
+## General
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `debug` | `bool` | `false` | Enable debug mode |
+
+## Model
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | `"Qwen/Qwen2.5-3B"` | HuggingFace model identifier or local path |
+| `model_dtype` | `"float32" \| "float16" \| "bfloat16"` | `"float32"` | Model weight precision |
+| `mixed_precision_dtype` | `"float32" \| "float16" \| "bfloat16" \| null` | `"bfloat16"` | FSDP mixed precision compute dtype. `null` to disable |
+
+## Environments
+
+At least one environment must be configured. Each entry is an object with these fields:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | *required* | Environment name (must match a registered environment) |
+| `weight` | `float` | `1.0` | Sampling weight for multi-environment training (must be > 0) |
+| `reward_min` | `float \| null` | `null` | Expected minimum reward (used by the UI for normalized charts) |
+| `reward_max` | `float \| null` | `null` | Expected maximum reward (used by the UI for normalized charts) |
+| `kwargs` | `dict` | `{}` | Environment-specific keyword arguments |
+
+```yaml
+environments:
+  - name: "hendrycks_math"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 1.0
+  - name: "countdown"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 2.0
+```
+
+## Workers
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inference_num_workers` | `int` | `2` | Number of vLLM inference workers. Must be divisible by `inference_tensor_parallel_size` |
+| `inference_tensor_parallel_size` | `int` | `1` | Tensor parallelism degree for each inference server |
+| `trainer_num_workers` | `int` | `2` | Number of FSDP/Megatron trainer workers |
+
+## Orchestrator
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_concurrent_prompts_per_server` | `int` | `32` | Max concurrent prompts per inference server |
+| `prompts_batch_size_for_trainer` | `int` | `16` | Number of prompt groups per training batch |
+| `number_of_steps` | `int` | `300` | Total training steps |
+| `max_async_rollout` | `int` | `2` | How many training steps inference can run ahead. `0` = fully synchronous |
+| `discard_group_zero_advantage` | `bool` | `true` | Drop groups where all samples got identical rewards (no learning signal) |
+| `enable_prompt_prefetch` | `bool` | `true` | Prefetch prompts from the dataset |
+| `prompt_prefetch_buffer_size` | `int` | `24` | Number of prompts to prefetch |
+| `enable_individual_sample_lanes` | `bool` | `true` | Each sample gets its own lane slot instead of one per group |
+| `max_off_policy_steps` | `int` | `8` | Cancel in-flight rollouts after this many weight updates |
+
+## Trainer
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `learning_rate` | `float` | `1.0e-6` | Learning rate (must be > 0) |
+| `weight_decay` | `float` | `0.0` | Weight decay coefficient |
+| `grad_clip` | `float` | `1.0` | Maximum gradient norm for clipping |
+| `lr_scheduler` | `"none" \| "constant" \| "linear" \| "cosine"` | `"constant"` | LR schedule. `"none"` = fixed LR; `"constant"` = warmup then constant; `"linear"` / `"cosine"` = warmup then decay |
+| `warmup_steps` | `int` | `0` | Number of linear warmup steps |
+| `min_lr_ratio` | `float` | `0.0` | Minimum LR as a fraction of `learning_rate` for linear/cosine decay. Range: [0, 1] |
+| `train_backend` | `"fsdp" \| "megatron"` | `"fsdp"` | Training backend |
+
+## Algorithm
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `algorithm` | `"grpo" \| "rloo" \| "reinforce_pp" \| "dr_grpo" \| "cispo" \| "gspo" \| "sapo"` | `"grpo"` | RL algorithm. See [Algorithms](/training/algorithms) |
+| `number_of_minibatches` | `int` | `1` | PPO-style gradient steps per rollout batch. >1 enables multiple update passes |
+| `advantage_norm` | `"group" \| "batch"` | `"group"` | Normalize advantages within each prompt group or across the training batch |
+| `use_ppo_clip` | `bool` | `false` | Apply PPO ratio clipping. Incompatible with `cispo`, `gspo`, `sapo` |
+| `ppo_clip_ref_logprobs` | `"rollout" \| "batch"` | `"rollout"` | Reference logprobs for PPO clipping. `"rollout"` = vLLM logprobs; `"batch"` = recompute with trainer |
+| `clip_low` | `float` | `0.4` | PPO clip lower bound: ratio is clamped to `1 - clip_low`. Range: [0, 1] |
+| `clip_high` | `float` | `0.5` | PPO clip upper bound: ratio is clamped to `1 + clip_high` |
+| `sapo_tau_pos` | `float` | `1.0` | SAPO sigmoid sharpness for positive advantages |
+| `sapo_tau_neg` | `float` | `1.05` | SAPO sigmoid sharpness for negative advantages |
+| `dr_grpo_loss_agg_mode` | `"token_mean" \| "token_sum_norm"` | `"token_mean"` | DR-GRPO loss aggregation. `"token_sum_norm"` removes response-level length bias |
+| `use_tis` | `bool` | `false` | Truncated importance sampling for [async](/training/async-training) vLLM/trainer logprob correction |
+| `tis_cap` | `float` | `2.0` | Max importance weight for TIS |
+| `tis_logprob_clamp` | `float` | `20.0` | Logprob clamping threshold for TIS |
+| `entropy_chunk_size` | `int` | `1024` | Chunk size for entropy calculation |
+
+<Warning>
+  `use_tis=true` + `use_ppo_clip=true` + `ppo_clip_ref_logprobs="rollout"` is invalid — it double-counts the importance sampling correction. Use `ppo_clip_ref_logprobs: "batch"` instead.
+</Warning>
+
+## Rollout / Sampling
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `group_size` | `int` | `8` | Number of completions sampled per prompt |
+| `temperature` | `float` | `1.0` | Sampling temperature |
+| `top_p` | `float \| null` | `null` | Nucleus sampling probability. `null` = disabled |
+| `max_tokens` | `int` | `3700` | Maximum generation tokens per completion |
+| `interleaved_rollouts` | `bool` | `true` | Exact token reuse across turns — avoids re-tokenization mismatches in multi-turn environments |
+
+## Sequence Packing
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `seq_len` | `int` | `4096` | Maximum sequence length for packing |
+| `pad_to_multiple_of` | `int` | `64` | Pad packed sequences to this alignment |
+
+## Inference Server
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inference_host` | `str` | `"0.0.0.0"` | Host address for inference servers |
+| `inference_base_port` | `int` | `8100` | Base port for inference servers |
+| `gpu_memory_utilization` | `float` | `0.9` | Fraction of GPU memory allocated to vLLM. Range: (0, 1] |
+| `max_model_len` | `int` | `4096` | Maximum context length for vLLM |
+| `vllm_scheduling_policy` | `"priority" \| "fcfs"` | `"priority"` | `"priority"` = turn-aware scheduling for multi-turn; `"fcfs"` = first-come-first-served |
+| `enable_thinking` | `bool` | `false` | Pass `enable_thinking=True` to `apply_chat_template()` for models with native thinking support |
+
+## Checkpointing
+
+See [Checkpointing](/training/checkpointing) for detailed usage.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `checkpoint_every` | `int \| bool` | `false` | Save every N steps. `0` or `false` to disable |
+| `checkpoint_save_training_state` | `bool` | `true` | Include optimizer/scheduler state for resume. `false` = weights-only |
+| `resume_from_checkpoint` | `bool \| int` | `false` | `true` = resume from latest; integer = resume from specific step |
+| `checkpoint_dir` | `str \| null` | `null` | Custom checkpoint path. Default: `RUN_DIR/checkpoints` |
+| `checkpoint_keep_last` | `int \| null` | `null` | Keep only the N most recent checkpoints |
+| `checkpoint_keep_every` | `int \| null` | `null` | Always keep checkpoints at these step multiples |
+
+## Evals
+
+See [Evals](/training/evals) for detailed usage.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `eval_before_training` | `bool` | `true` | Run evaluations before training starts |
+| `eval_after_training` | `bool` | `true` | Run evaluations after training ends |
+| `eval_num_servers` | `int` | `1` | Number of dedicated eval servers reserved from the inference pool. `0` = no periodic evals during training |
+| `eval_start_end_use_all_servers` | `bool` | `true` | Use all inference servers for start/end evals |
+
+Each eval entry supports:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | *required* | Eval name (environment name or dedicated eval like `math500`) |
+| `eval_every` | `int` | `10` | Run this eval every N training steps |
+| `num_samples` | `int` | `-1` | Number of samples to evaluate. `-1` = full dataset |
+| `separate_eval_samples` | `bool` | `false` | Use a separate set of eval samples |
+| `kwargs` | `dict` | `{}` | Environment-specific keyword arguments |
+| `pass_k` | `dict` | `{}` | pass@k / pass^k configuration |
+| `temperature` | `float \| null` | `null` | Override sampling temperature (`null` = inherit from training config) |
+| `top_p` | `float \| null` | `null` | Override nucleus sampling (`null` = inherit) |
+| `max_tokens` | `int \| null` | `null` | Override max tokens (`null` = inherit) |
+
+```yaml
+evals:
+  - name: "math500"
+    eval_every: 10
+    num_samples: 500
+    kwargs:
+      dataset_name: "HuggingFaceH4/MATH-500"
+      dataset_split: "test"
+    temperature: 1.0
+    max_tokens: 3000
+```
+
+## Logging
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `use_wandb` | `bool` | `true` | Enable Weights & Biases logging |
+| `wandb_project` | `str` | `"telescope"` | W&B project name |
+| `wandb_run_name` | `str` | `"telescope_run"` | W&B run name |
+| `wandb_tags` | `list[str]` | `["telescope"]` | W&B tags |
+| `wandb_upload_code` | `bool` | `true` | Upload source code to W&B |
+| `wandb_code_max_file_size_mb` | `float` | `2.0` | Max file size for code upload |
+| `wandb_code_exclude_patterns` | `list[str]` | `[".git", ".venv", ...]` | Glob patterns to exclude from code upload |
+| `system_metrics_collection_interval_seconds` | `float` | `1.0` | System metrics collection interval |
+| `torch_memory_sample_interval_seconds` | `float` | `0.1` | PyTorch memory sampling interval |
+| `event_tail_window_seconds` | `int` | `60` | Tail window for event aggregation |
+| `event_block_duration_seconds` | `int` | `1800` | Duration of event blocks |
+| `event_upload_interval_seconds` | `int` | `5` | Event upload interval |
+| `metrics_logger_interval_seconds` | `float` | `2.0` | Metrics logger flush interval |
+| `ray_torch_memory_drain_interval_seconds` | `float` | `0.5` | Interval for draining Ray torch memory metrics |
+| `rollout_block_size` | `int` | `500` | Block size for rollout event grouping |
+| `track_gpu_events` | `bool` | `true` | Track GPU utilization events |
+
+## Ray Cluster
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ray_address` | `str` | `"auto"` | Ray cluster address |
+| `ray_auto_start_local` | `bool` | `true` | Auto-start a local Ray cluster if none is running |
+| `ray_namespace` | `str` | `"telescope"` | Ray namespace |
+| `ray_log_to_driver` | `bool` | `true` | Forward worker logs to the driver process |
+| `ray_runtime_env` | `dict \| null` | `null` | Custom Ray runtime environment |
+| `ray_disable_runtime_env_hook` | `bool` | `true` | Disable Ray's runtime environment hook |
+| `ray_pin_py_executable` | `bool` | `true` | Pin the Python executable path in workers |
+| `ray_propagate_active_venv` | `bool` | `true` | Propagate the active virtualenv to workers |
+| `ray_propagate_run_dir` | `bool` | `true` | Propagate the run directory to workers |
+| `ray_broadcast_init_timeout_s` | `int` | `300` | Timeout for weight broadcast initialization |
+| `ray_broadcast_prefer_loopback_if_single_node` | `bool` | `true` | Prefer loopback interface for single-node broadcasts |
+| `ray_shutdown_on_exit` | `bool` | `false` | Shut down the Ray cluster on exit |
+| `ray_inference_cpus_per_worker` | `float` | `4.0` | CPU cores allocated per inference worker |
+| `ray_trainer_cpus_per_worker` | `float` | `4.0` | CPU cores allocated per trainer worker |
+| `ray_inference_placement_strategy` | `"PACK" \| "SPREAD" \| "STRICT_PACK" \| "STRICT_SPREAD"` | `"PACK"` | Placement strategy for inference workers |
+| `ray_trainer_placement_strategy` | `"PACK" \| "SPREAD" \| "STRICT_PACK" \| "STRICT_SPREAD"` | `"PACK"` | Placement strategy for trainer workers |
+| `ray_placement_timeout_s` | `int` | `900` | Timeout for Ray placement group creation |
+
+## Weight Broadcasting
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `weight_broadcast_mode` | `"flattened_bucket" \| "per_tensor"` | `"flattened_bucket"` | Strategy for broadcasting updated weights to inference servers |
+| `weight_broadcast_bucket_mb` | `int` | `256` | Bucket size in MB for flattened broadcast |
+| `weight_broadcast_cpu_staging` | `bool` | `false` | Use CPU staging buffer for weight transfers |
+| `weight_broadcast_pin_memory` | `bool` | `true` | Use pinned CPU memory for faster H2D transfers |
+| `weight_broadcast_free_grad_buffers` | `bool` | `true` | Free Megatron gradient buffers during broadcast (saves ~14 GB) |
+
+## Megatron
+
+<Note>
+  These settings are ignored when `train_backend: "fsdp"`. Only relevant when `train_backend: "megatron"`.
+</Note>
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `megatron_tensor_parallel_size` | `int` | `1` | Tensor parallelism degree |
+| `megatron_pipeline_parallel_size` | `int` | `1` | Pipeline parallelism degree |
+| `megatron_context_parallel_size` | `int` | `1` | Context parallelism degree |
+| `megatron_expert_parallel_size` | `int` | `1` | Expert parallelism degree (MoE models) |
+| `megatron_global_batch_size` | `int \| null` | `null` | Global batch size. Defaults to `prompts_batch_size_for_trainer` |
+| `megatron_disable_unified_memory_jit` | `bool` | `true` | Disable unified memory JIT |
+| `megatron_optimizer_cpu_offload` | `bool` | `false` | Offload optimizer states to CPU |
+| `megatron_optimizer_offload_fraction` | `float` | `1.0` | Fraction of optimizer state to offload. Range: [0, 1] |
+| `megatron_overlap_cpu_optimizer_d2h_h2d` | `bool` | `true` | Overlap CPU optimizer D2H/H2D transfers |
+| `megatron_use_precision_aware_optimizer` | `bool` | `false` | Use precision-aware optimizer |
+| `megatron_main_grads_dtype` | `str` | `"float32"` | Data type for main gradients |
+| `megatron_main_params_dtype` | `str` | `"float32"` | Data type for main parameters |
+| `megatron_exp_avg_dtype` | `str` | `"float32"` | Data type for Adam exponential average |
+| `megatron_exp_avg_sq_dtype` | `str` | `"float32"` | Data type for Adam exponential average squared |
+| `megatron_grad_reduce_in_fp32` | `bool` | `true` | Reduce gradients in FP32. `false` halves grad buffer memory (~14 GB savings) |
+| `megatron_gradient_checkpointing` | `bool` | `true` | Recompute activations in backward pass (~15-20 GB memory savings) |
+| `megatron_sequence_parallel` | `bool` | `true` | Shard sequence dimension in LayerNorm/dropout (requires TP > 1) |
+| `megatron_use_distributed_optimizer` | `bool` | `true` | Shard optimizer states across DP ranks (requires DP > 1) |
+| `megatron_overlap_grad_reduce` | `bool` | `false` | Overlap gradient allreduce with backward compute |
+| `megatron_use_transformer_engine` | `bool` | `false` | Use TransformerEngine layer spec (fused attention, FP8-ready) |
+| `megatron_fp8` | `bool` | `false` | Enable FP8 compute (requires TransformerEngine + Hopper GPU) |
+
+## vLLM Tracing
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `enable_vllm_tracing` | `bool` | `true` | Enable OpenTelemetry tracing for vLLM |
+| `otlp_receiver_port` | `int` | `4318` | OTLP HTTP receiver port. Range: [1, 65535] |

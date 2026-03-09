@@ -1,0 +1,90 @@
+---
+title: "Checkpointing"
+---
+
+Telescope saves checkpoints during training so you can resume interrupted runs and export trained models. Checkpoints include model weights and optionally optimizer/scheduler state, and are saved in the backend's native format (PyTorch DCP for FSDP, dist_checkpointing for Megatron).
+
+## Configuration
+
+```yaml
+checkpoint_every: 50          # Save every N steps (0 or false to disable)
+checkpoint_save_training_state: true  # Include optimizer/scheduler state for resume
+checkpoint_dir: null           # Custom path; default: RUN_DIR/checkpoints
+checkpoint_keep_last: null     # Keep only the N most recent checkpoints
+checkpoint_keep_every: null    # Always keep checkpoints at these step multiples
+```
+
+When checkpointing is enabled, a checkpoint is always saved at the final training step regardless of the `checkpoint_every` interval.
+
+## Checkpoint directory structure
+
+Checkpoints are saved under `checkpoints/` in your run directory (or the path set by `checkpoint_dir`):
+
+```
+checkpoints/
+├── step_50/
+│   ├── meta.json              # Backend type, step, model name
+│   ├── hf_meta/               # HF config, tokenizer files
+│   ├── orchestrator_state.json  # Orchestrator counters, RNG state
+│   └── ...                    # Native checkpoint files (DCP shards or Megatron dist_checkpointing)
+├── step_100/
+│   └── ...
+```
+
+## Cleanup rules
+
+By default, all checkpoints are kept. Use `checkpoint_keep_last` and `checkpoint_keep_every` to manage disk space:
+
+```yaml
+checkpoint_every: 10
+checkpoint_keep_last: 3       # Keep the 3 most recent
+checkpoint_keep_every: 50     # Also keep every 50th step permanently
+```
+
+A checkpoint is kept if it matches **either** rule. With the config above, after step 120 you'd have: `step_50`, `step_100`, `step_110`, `step_120`.
+
+## Resuming training
+
+Set `resume_from_checkpoint` to continue from where training left off:
+
+```yaml
+resume_from_checkpoint: true  # Resume from the latest checkpoint
+```
+
+You can also resume from a specific step:
+
+```yaml
+resume_from_checkpoint: 50    # Resume from step_50
+```
+
+Resume restores model weights, optimizer state, learning rate schedule, orchestrator counters, and the dataset sampling order — so training continues exactly where it stopped. This requires `checkpoint_save_training_state: true` (the default) on the original run.
+
+## Weights-only checkpoints
+
+Set `checkpoint_save_training_state: false` to save only model weights without optimizer or scheduler state. This produces smaller checkpoints that can be converted to HuggingFace format but cannot be used for resume.
+
+```yaml
+checkpoint_save_training_state: false
+```
+
+## Converting to HuggingFace format
+
+Checkpoints are saved in the training backend's native format. To use a checkpoint with vLLM, HuggingFace, or other tools, convert it to standard HuggingFace format (safetensors + config.json):
+
+**Single checkpoint:**
+
+```bash
+python tools/convert_checkpoint_to_hf.py \
+  --checkpoint-dir checkpoints/step_100 \
+  --output-dir converted/step_100
+```
+
+**All checkpoints in a directory:**
+
+```bash
+python tools/convert_checkpoint_to_hf.py \
+  --checkpoint-root checkpoints \
+  --output-root converted
+```
+
+The converter handles both FSDP (DCP) and Megatron checkpoints automatically based on the `meta.json` backend field. Already-converted checkpoints are skipped in batch mode.

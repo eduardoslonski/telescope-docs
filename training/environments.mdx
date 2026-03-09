@@ -1,0 +1,261 @@
+---
+title: "Environments"
+---
+
+An environment defines a training task. It provides three things:
+
+1. **Dataset** — the prompts to train on
+2. **Prompt formatting** — how to present prompts to the model
+3. **Reward function** — how to score the model's completions
+
+## Single-turn vs multi-turn
+
+### Single-turn
+
+The simplest type. The model receives a prompt, generates one completion, and gets a reward.
+
+```
+Prompt → Model completion → Reward
+```
+
+Examples: math problems, code generation, instruction following.
+
+### Multi-turn
+
+The model interacts with the environment over multiple rounds. After each model response, the environment provides feedback, and the model responds again until a stop condition is met.
+
+```
+Prompt → Model completion → Environment feedback → Model completion → ... → Reward
+```
+
+Examples: games (Wordle), agent tasks, tool use.
+
+## Building a single-turn environment
+
+Create a folder under `src/telescope/environments/` with an `environment.py` file. The folder name becomes the environment name automatically. Extend `SingleTurnEnvironment` and implement `load_dataset()` and `compute_reward()`:
+
+```python
+from datasets import load_dataset
+from telescope.environments.base import (
+    Sample,
+    RewardResult,
+    SingleTurnEnvironment,
+)
+
+
+class MyEnvironment(SingleTurnEnvironment):
+
+    def load_dataset(self, num_samples: int = -1, **kwargs) -> list[Sample]:
+        dataset = load_dataset("my-org/my-dataset", split="train")
+
+        if num_samples > 0:
+            dataset = dataset.select(range(min(num_samples, len(dataset))))
+
+        samples = []
+        for item in dataset:
+            samples.append(Sample(
+                prompt=item["question"],
+                answer=item["answer"],
+                metadata={"question": item["question"]},
+            ))
+
+        self._samples = samples
+        return samples
+
+    def compute_reward(
+        self,
+        completion: str,
+        sample: Sample,
+        eos_token: str = "",
+    ) -> RewardResult:
+        if eos_token and completion.endswith(eos_token):
+            completion = completion[: -len(eos_token)]
+
+        # Your reward logic here
+        is_correct = completion.strip() == sample.answer.strip()
+
+        return RewardResult(
+            total_reward=1.0 if is_correct else 0.0,
+            sample_metrics={"accuracy": 1.0 if is_correct else 0.0},
+            golden_answers={"answer": sample.answer},
+        )
+```
+
+### Key types
+
+**`Sample`** — a single training example:
+- `prompt` — the question or task text (string or list of chat messages)
+- `answer` — ground truth for reward computation
+- `metadata` — any extra data needed by your reward function
+
+**`RewardResult`** — the output of reward computation:
+- `total_reward` — the scalar reward used for training
+- `sample_metrics` — component breakdown for logging (e.g., `{"format": 0.5, "correctness": 1.0}`)
+- `golden_answers` — ground truth answers for display in the UI
+- `info_turns` — per-turn text info for display in the UI (e.g., stderr, summaries). Each entry is a dict with `turn_order`, `info_key`, `info_value`, and `info_type`
+
+### Prompt formatting
+
+`SingleTurnEnvironment` handles prompt formatting automatically. You can customize the system prompt and instruction prompt:
+
+```python
+class MyEnvironment(SingleTurnEnvironment):
+    def __init__(self, **kwargs):
+        super().__init__(
+            system_prompt="You are a helpful assistant.",
+            instruction_prompt="Solve the following problem step by step.",
+            **kwargs,
+        )
+```
+
+The environment uses the model's tokenizer `apply_chat_template()` to format the messages at rollout time.
+
+## Building a multi-turn environment
+
+Multi-turn environments extend `MultiTurnEnvironment`. In addition to `load_dataset` and `compute_reward`, you implement the interaction loop:
+
+```python
+from telescope.environments.base import (
+    Sample,
+    RewardResult,
+    RolloutState,
+    ChatMessage,
+    MultiTurnEnvironment,
+)
+
+
+class MyGameEnvironment(MultiTurnEnvironment):
+
+    def load_dataset(self, num_samples: int = -1, **kwargs) -> list[Sample]:
+        # Generate or load game instances
+        samples = []
+        for i in range(num_samples if num_samples > 0 else 1000):
+            samples.append(Sample(
+                prompt="Play the game. Submit your move in <move>...</move> tags.",
+                answer="",  # May not have a fixed answer
+                metadata={"game_id": i},
+            ))
+        self._samples = samples
+        return samples
+
+    def create_initial_state(self, sample: Sample) -> RolloutState:
+        state = super().create_initial_state(sample)
+        # Initialize per-game state
+        state.custom["score"] = 0
+        state.custom["moves"] = []
+        return state
+
+    def env_response(
+        self,
+        messages: list[ChatMessage],
+        state: RolloutState,
+    ) -> list[ChatMessage]:
+        # Parse the model's action from the last assistant message
+        last_msg = messages[-1]["content"]
+        # ... parse and process the action ...
+
+        # Update game state
+        state.custom["moves"].append(last_msg)
+
+        # Return feedback (or empty list to end the game)
+        if game_over:
+            return []
+
+        return [{"role": "user", "content": "Feedback: ..."}]
+
+    def is_done(self, state: RolloutState) -> tuple[bool, str | None]:
+        if state.num_turns >= self.max_turns:
+            return True, "max_turns_reached"
+        return False, None
+
+    def compute_reward(
+        self,
+        state: RolloutState,
+        eos_token: str = "",
+    ) -> RewardResult:
+        # Compute reward from the full trajectory
+        score = state.custom["score"]
+        return RewardResult(
+            total_reward=score,
+            sample_metrics={"score": score},
+        )
+```
+
+### Key types
+
+**`RolloutState`** — tracks the full rollout:
+- `sample` — the original `Sample`
+- `env_name` — the environment name this rollout belongs to
+- `trajectory` — list of `TrajectoryStep` (one per turn, with prompt, completion, token IDs, logprobs)
+- `custom` — dict for your per-game state (scores, board state, etc.)
+- `num_turns` — how many turns have been completed
+- `is_completed` / `stop_reason` — set by the orchestrator when rollout ends
+- `error` — set when the rollout encounters an error
+
+**`env_response`** — called after each model response:
+- Receives the full message history and the current state
+- Returns a list of messages to append (typically one `user` message with feedback)
+- Return an empty list `[]` to signal the game is over
+
+**`is_done`** — called after each turn:
+- Returns `(True, "reason")` to stop or `(False, None)` to continue
+- The default implementation checks `max_turns`
+
+## Auto-discovery
+
+Telescope discovers environments automatically. To register a new environment, just create a folder under `src/telescope/environments/`:
+
+```
+src/telescope/environments/
+└── my_environment/
+    └── environment.py    # Must contain a concrete Environment subclass
+```
+
+No `__init__.py` or manual registration needed. You can then reference it in your config:
+
+```yaml
+environments:
+  - name: "my_environment"
+    weight: 1.0
+    reward_min: 0.0
+    reward_max: 1.0
+```
+
+## Configuration
+
+Environments are configured in your training YAML under the `environments` key:
+
+```yaml
+environments:
+  - name: "countdown"       # Matches the folder name
+    weight: 1.0             # Sampling weight (for multi-environment training)
+    reward_min: 0.0         # Min possible reward (for normalization)
+    reward_max: 2.0         # Max possible reward
+    kwargs:                 # Passed to the environment's __init__
+      dataset_split: "train"
+      shuffle: true
+```
+
+### Multi-environment training
+
+You can train on multiple environments simultaneously by listing them with weights:
+
+```yaml
+environments:
+  - name: "countdown"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 2.0
+  - name: "hendrycks_math"
+    weight: 0.5
+    reward_min: 0.0
+    reward_max: 1.0
+```
+
+Prompts are sampled from each environment proportionally to their weights.
+
+## Next steps
+
+- [Metrics](/training/metrics) — sample metrics, reward tracking, and what gets logged to the UI
+- [Tool Calling & Agentic Training](/training/tool-calling) — building tool-using environments with `ToolEnvironment`
+- [Data Preparation](/training/data-preparation) — dataset formats, prompt templates, and sizing guidelines

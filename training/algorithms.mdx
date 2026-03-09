@@ -1,0 +1,104 @@
+---
+title: "Algorithms"
+---
+
+Telescope supports several RL algorithms for computing the policy gradient loss. All algorithms follow the same core loop — generate completions, compute rewards, normalize advantages within a group of samples for the same prompt, and update the model — but differ in how they compute and weight the gradient signal.
+
+Set the algorithm in your config:
+
+```yaml
+algorithm: "grpo"  # default
+```
+
+## GRPO
+
+Group Relative Policy Optimization. The default algorithm and a good starting point.
+
+Advantages are computed by normalizing rewards within each prompt group (mean-centered and divided by standard deviation). The loss is a standard policy gradient: `-log_probs * advantage`.
+
+```yaml
+algorithm: "grpo"
+group_size: 8
+advantage_norm: "group"  # or "batch"
+```
+
+## RLOO
+
+REINFORCE Leave-One-Out. Uses a leave-one-out baseline instead of the group mean, making it less sensitive to outliers in the reward distribution.
+
+For each sample, the advantage is scaled by `n / (n - 1)` to correct for the leave-one-out bias. Requires per-group normalization (batch normalization is not compatible).
+
+```yaml
+algorithm: "rloo"
+group_size: 8
+```
+
+## REINFORCE++
+
+Uses two-stage advantage normalization: first subtracts the group mean, then re-normalizes across the full training batch. This gives more stable gradients when batch sizes are large.
+
+Requires batch-level normalization (per the [paper](https://arxiv.org/abs/2501.03262)).
+
+```yaml
+algorithm: "reinforce_pp"
+advantage_norm: "batch"  # required, set automatically
+```
+
+## DR-GRPO
+
+Distributional Reward GRPO. A variant of GRPO that removes response-level length bias. Advantages are mean-centered but not divided by standard deviation, and the loss can be aggregated in a way that normalizes by `num_samples * seq_len` instead of total valid tokens.
+
+```yaml
+algorithm: "dr_grpo"
+dr_grpo_loss_agg_mode: "token_mean"  # or "token_sum_norm" to remove length bias
+```
+
+## CISPO
+
+Clipped Importance-Sampled Policy Optimization. Computes the importance sampling ratio between current and reference policy logprobs, clamps it, and uses the clamped ratio as a per-token weighting factor on the policy gradient.
+
+```yaml
+algorithm: "cispo"
+clip_low: 0.4   # ratio lower bound: 1 - 0.4 = 0.6
+clip_high: 0.5  # ratio upper bound: 1 + 0.5 = 1.5
+```
+
+## GSPO
+
+Geometric Sequence Policy Optimization. Designed for packed sequences. Uses sequence-level geometric mean of log ratios with per-token gradient scaling, so gradient magnitude is independent of sequence length. Applies PPO-style clipping on the sequence-level ratio.
+
+```yaml
+algorithm: "gspo"
+clip_low: 0.4
+clip_high: 0.5
+```
+
+## SAPO
+
+Sigmoid-Gated Advantage Policy Optimization. Uses a sigmoid gate on the importance sampling ratio for smoother updates than hard clipping. The gate sharpness can be tuned separately for positive and negative advantages.
+
+```yaml
+algorithm: "sapo"
+sapo_tau_pos: 1.0   # sigmoid sharpness for positive advantages
+sapo_tau_neg: 1.05  # sigmoid sharpness for negative advantages
+```
+
+## PPO clipping
+
+PPO-style ratio clipping can be layered on top of GRPO, RLOO, REINFORCE++, or DR-GRPO for trust-region updates. It is not compatible with CISPO, GSPO, or SAPO, which have their own ratio handling.
+
+```yaml
+use_ppo_clip: true
+clip_low: 0.4
+clip_high: 0.5
+ppo_clip_ref_logprobs: "rollout"  # "rollout" = vLLM logprobs, "batch" = recompute with trainer
+```
+
+## Minibatches
+
+By default, each training batch is used for a single gradient step. Setting `number_of_minibatches` > 1 splits the batch into minibatches and runs multiple gradient steps per rollout batch (PPO-style):
+
+```yaml
+number_of_minibatches: 4
+use_ppo_clip: true  # recommended with multiple minibatches
+```

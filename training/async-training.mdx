@@ -1,0 +1,51 @@
+---
+title: "Async Training"
+---
+
+## The core idea
+
+In standard synchronous RL training, the loop is sequential: generate samples, train on them, repeat. The GPUs running inference sit idle during training, and vice versa.
+
+Telescope decouples inference and training so they run concurrently. While the trainer updates weights on the current batch, the inference engine generates samples for the next batch using the most recent weights available.
+
+```
+Synchronous:
+  Inference ████░░░░████░░░░████░░░░
+  Training  ░░░░████░░░░████░░░░████
+
+Asynchronous:
+  Inference ████████████████████████
+  Training  ░░██████████████████████
+```
+
+## How it works
+
+The `max_async_rollout` parameter controls how many training steps the inference engine can run ahead of the trainer:
+
+```yaml
+max_async_rollout: 2  # inference can be up to 2 training steps ahead
+```
+
+- `0` — fully synchronous: inference waits for each training step to complete before generating new samples
+- `N` — inference can run up to N steps ahead, pausing only when the gap exceeds N
+
+The orchestrator tracks two counters: `inference_step` (batches assembled for training) and `trainer_step` (completed gradient updates). When `inference_step - trainer_step > max_async_rollout`, the rollout loop pauses until the trainer catches up.
+
+## Importance sampling correction
+
+When inference runs ahead, the samples it generates may use slightly stale weights. Telescope offers **Truncated Importance Sampling (TIS)** to correct for this off-policy mismatch:
+
+```yaml
+use_tis: true
+tis_cap: 2.0  # max importance weight
+```
+
+TIS reweights the policy gradient by the ratio of current to rollout log-probabilities, capped at `tis_cap` to prevent high-variance updates.
+
+## Stale rollout cancellation
+
+With async training, some in-flight rollouts may become too stale to be useful. The `max_off_policy_steps` parameter cancels rollouts that have fallen behind by too many weight updates:
+
+```yaml
+max_off_policy_steps: 8  # cancel after 8 weight updates (-1 to disable)
+```

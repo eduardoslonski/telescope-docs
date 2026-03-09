@@ -1,0 +1,84 @@
+---
+title: "Visualization"
+---
+
+Telescope includes a local UI for monitoring training runs in real time. The trainer uploads structured data to Weights & Biases during training, and the UI downloads and indexes it into a local DuckDB database for fast querying and visualization.
+
+<Note>
+  For UI installation and usage, see the [UI Visualization](/visualization/installation) tab.
+</Note>
+
+## How the data flows
+
+```
+Trainer → W&B Files → Telescope UI → DuckDB → Dashboard
+```
+
+1. **Trainer uploads** — During training, the orchestrator continuously packages events, metrics, and rollout data into compressed zip archives (parquet files inside) and uploads them to the W&B run's file storage.
+
+2. **UI discovers runs** — The UI polls your added W&B projects for runs tagged with `telescope`. Any matching run is picked up for syncing.
+
+3. **UI downloads and ingests** — The UI downloads new zip archives, extracts the parquet files, and inserts the data into a local DuckDB database. It tracks what it has already ingested to avoid duplicate work.
+
+4. **Dashboard queries DuckDB** — The frontend queries the local database for timeline events, rollout samples, metrics, and eval results to render the dashboard.
+
+## What the trainer uploads
+
+The trainer uploads two categories of data as W&B files:
+
+### Events
+
+Timeline events and system metrics, packaged into zip archives under `events/`:
+
+- **`events/tail.zip`** — The last 60 seconds of data (updated every 5 seconds). Contains orchestrator events, trainer events, inference request timings, GPU metrics, CPU metrics, and vLLM server metrics.
+- **`events/block_live.zip`** — The current 30-minute block being built.
+- **`events/block_0.zip`, `block_1.zip`, ...** — Finalized 30-minute blocks of historical data.
+
+### Steps
+
+Per-step rollout data (prompts, completions, rewards, eval results), packaged under `steps/`:
+
+- **`steps/tail.zip`** — The last 5 training steps (updated every 5 seconds).
+- **`steps/block_live.zip`** — The current block being built (up to 500 steps).
+- **`steps/block_0.zip`, `block_1.zip`, ...** — Finalized blocks of historical step data.
+
+Each zip contains multiple parquet files (prompts, rollouts, metrics, golden answers, etc.) and a `metadata.json` with indexing information that helps the UI sync incrementally.
+
+## Incremental sync
+
+The UI doesn't re-download everything on each poll. Each parquet file includes a `tail_idx` column that tracks which upload cycle produced it. The UI stores the last ingested `tail_idx` and only processes new data. For step blocks, it tracks which block indices have been ingested and only downloads new finalized blocks.
+
+## Run summary
+
+The trainer updates the W&B run summary every 5 seconds with metadata the UI uses to know what data is available:
+
+- `events/current_tail_idx` — Latest event upload cycle
+- `events/num_finalized_blocks` — Number of finalized event blocks
+- `steps/last_training_step` — Last completed training step
+- `steps/num_finalized_blocks` — Number of finalized step blocks
+
+The UI compares these values against its local state to determine what needs downloading.
+
+## Data stored in DuckDB
+
+Once ingested, the UI has local access to:
+
+| Category | Tables |
+|----------|--------|
+| **Timeline** | Orchestrator events, trainer events, inference request timings, weight broadcast events |
+| **System metrics** | Per-GPU metrics (utilization, memory, temperature, power), CPU/memory metrics |
+| **vLLM metrics** | Requests running/waiting, KV cache usage, token throughput, latencies |
+| **Rollouts** | Prompts, completions, token counts, per-sample reward breakdowns, golden answers |
+| **Evals** | Eval prompts, completions, metrics, golden answers (both periodic and post-training) |
+
+## Configuration
+
+The trainer side is controlled by these config parameters:
+
+```yaml
+use_wandb: true                    # Enable W&B logging (required for UI)
+wandb_project: "my-project"        # W&B project name
+wandb_tags: ["telescope"]          # Must include "telescope" for UI discovery
+```
+
+The `telescope` tag is what the UI uses to find runs. Runs without it won't appear in the dashboard. You can add `telescope-ignore` to a run's tags to hide it from the UI.

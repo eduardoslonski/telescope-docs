@@ -1,0 +1,50 @@
+---
+title: "Installation"
+---
+
+## Install
+
+```bash
+pip install telescope-ui
+```
+
+Requires Python 3.11+.
+
+## Configure W&B
+
+Telescope UI reads training data from Weights & Biases. Run `wandb login` once to authenticate:
+
+```bash
+wandb login
+```
+
+You can also provide a W&B API key directly through the UI on first launch.
+
+## Start the dashboard
+
+```bash
+telescope
+```
+
+This starts the server and opens the dashboard at `http://localhost:8005`.
+
+| Flag | Description |
+|------|-------------|
+| `--port PORT` | Port to serve on (default: 8005) |
+| `--host HOST` | Host to bind to (default: 127.0.0.1) |
+| `--no-browser` | Don't open the browser automatically |
+| `--debug` | Enable verbose logging |
+
+## Connect to training runs
+
+On first launch, add a W&B project to monitor using the **Add Project** option in the sidebar. Enter the project path in `entity/project` format. Telescope will poll that project for runs tagged with `telescope` — the default training config already includes this tag, so any training runs in the project will appear automatically.
+
+You can add more projects at any time from the sidebar menu.
+
+## Data storage
+
+All synced data is stored locally in a DuckDB database at `~/.telescope/`. You can override this location with the `TELESCOPE_DATA_DIR` environment variable.
+
+## Stack
+
+Telescope UI is built with a FastAPI server, a TypeScript frontend, and a DuckDB database. It runs locally on your personal machine and connects to training data produced by the trainer.

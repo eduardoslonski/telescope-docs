@@ -1,0 +1,89 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Telescope",
+  "colors": {
+    "primary": "#3c75c4",
+    "light": "#3B6BC4",
+    "dark": "#1A3366"
+  },
+  "favicon": "/favicon.ico",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Training",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "training/installation",
+              "training/examples",
+              "training/config"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "training/architecture",
+              "training/async-training",
+              "training/algorithms",
+              "training/environments",
+              "training/metrics",
+              "training/data-preparation",
+              "training/tool-calling",
+              "training/features"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "training/checkpointing",
+              "training/multi-node",
+              "training/evals",
+              "training/visualization",
+              "training/performance",
+              "training/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "UI Visualization",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "visualization/installation",
+              "visualization/how-it-works"
+            ]
+          },
+          {
+            "group": "Pages",
+            "pages": [
+              "visualization/overview",
+              "visualization/metrics",
+              "visualization/rollouts",
+              "visualization/timeline",
+              "visualization/infra",
+              "visualization/evals"
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "visualization/runs",
+              "visualization/database"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/logo-full.png",
+    "dark": "/logo/logo-full-dark.png"
+  },
+  "contextual": {
+    "options": []
+  }
+}

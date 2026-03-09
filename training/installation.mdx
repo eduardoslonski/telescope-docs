@@ -1,0 +1,97 @@
+---
+title: "Installation"
+---
+
+Telescope can be installed via **Docker** (recommended), which comes with everything ready including performance libraries (like Transformer Engine and NVIDIA Apex), or **from source**, which is simpler but lacks some performance optimizations.
+
+<Tabs>
+  <Tab title="Docker (recommended)">
+    **Prerequisites:** NVIDIA GPU(s), [Docker](https://docs.docker.com/get-docker/) with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
+    <Tip>
+      On GPU cloud platforms like Vast.ai and RunPod, you just need to create a custom template with the image `ghcr.io/eduardoslonski/telescope:latest` — they handle the rest. On Lambda, CoreWeave, and similar VM-based platforms, Docker comes preinstalled so you can pull and run the image directly.
+    </Tip>
+
+    ### Pull the image
+
+    ```bash
+    docker pull ghcr.io/eduardoslonski/telescope:latest
+    ```
+
+    ### Start the container
+
+    ```bash
+    docker run --rm --gpus all --ipc=host --shm-size=16g \
+      --ulimit memlock=-1 --ulimit stack=67108864 --ulimit nofile=65536:65536 \
+      -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
+    ```
+
+    <Note>
+      `--ipc=host` and `--shm-size=16g` are required for NCCL shared memory across GPUs. `--ulimit memlock=-1` unlocks GPU memory pinning for efficient transfers. Platforms like Vast.ai and RunPod handle these flags automatically when using their template system.
+    </Note>
+
+    The Telescope source code is located at `/root/telescope` inside the container.
+
+    ### Set up Weights & Biases
+
+    Telescope logs training data to [Weights & Biases](https://wandb.ai/), which the [UI Visualization](/visualization/installation) uses to display metrics and rollouts. Log in before starting training:
+
+    ```bash
+    wandb login
+    ```
+
+    ### Run training
+
+    Inside the container, run training with any of the [example configs](/training/examples):
+
+    ```bash
+    uv run train.py --config configs/examples/example_countdown.yaml
+    ```
+  </Tab>
+  <Tab title="From source">
+    **Prerequisites:** NVIDIA GPU(s), Python 3.11+, [uv](https://docs.astral.sh/uv/)
+
+    Install uv (if not already installed):
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+    ```bash
+    git clone https://github.com/eduardoslonski/telescope.git
+    cd telescope
+
+    uv venv --python 3.11
+    source .venv/bin/activate
+    uv sync
+    ```
+
+    ### Set up Weights & Biases
+
+    Telescope logs training data to [Weights & Biases](https://wandb.ai/), which the [UI Visualization](/visualization/installation) uses to display metrics and rollouts. Log in before starting training:
+
+    ```bash
+    wandb login
+    ```
+
+    ### Run training
+
+    Run training with any of the [example configs](/training/examples):
+
+    ```bash
+    uv run train.py --config configs/examples/example_countdown.yaml
+    ```
+
+    <Warning>
+      Installing from source does not include some performance libraries (Transformer Engine, NVIDIA Apex) that are pre-built in the Docker image and require complex compilation from source. Training will still work fine, just without the accelerated performance those provide.
+    </Warning>
+  </Tab>
+</Tabs>
+
+You can override any config parameter from the command line:
+
+```bash
+uv run train.py --config configs/examples/example_countdown.yaml \
+  --learning_rate 5e-7 \
+  --number_of_steps 500
+```

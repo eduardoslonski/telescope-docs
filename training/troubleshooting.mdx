@@ -95,7 +95,13 @@ Compare a short run at `max_async_rollout: 0` (synchronous) vs your async settin
 
 ### Can I use a custom chat template?
 
-Telescope uses the tokenizer's `apply_chat_template()` by default. If your model has a custom template, ensure it's included in the tokenizer configuration (usually `tokenizer_config.json`). You can also override `format_prompt()` in your environment for full control.
+Telescope uses the tokenizer's `apply_chat_template()` by default. If your model doesn't include a chat template (common with base models), set the `chat_template` config field to a Jinja2 template string:
+
+```yaml
+chat_template: "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{'<|im_start|>assistant\n'}}{% endif %}"
+```
+
+This overrides the tokenizer's built-in template. You can also override `format_prompt()` in your environment for full control.
 
 ### How do I train on multiple tasks at once?
 

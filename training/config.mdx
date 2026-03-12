@@ -189,6 +189,7 @@ environments:
 | `max_model_len` | `int` | `4096` | Maximum context length for vLLM |
 | `vllm_scheduling_policy` | `"priority" \| "fcfs"` | `"priority"` | `"priority"` = turn-aware scheduling for multi-turn; `"fcfs"` = first-come-first-served |
 | `enable_thinking` | `bool` | `false` | Pass `enable_thinking=True` to `apply_chat_template()` for models with native thinking support |
+| `chat_template` | `str \| null` | `null` | Jinja2 chat template string to override the tokenizer's built-in template. Required for base models that don't include a chat template in their tokenizer |
 
 ## Checkpointing
 

@@ -22,6 +22,7 @@ Telescope can be installed via **Docker** (recommended), which comes with everyt
 
     ```bash
     docker run --rm --gpus all --ipc=host --shm-size=16g \
+      --network=host \
       --ulimit memlock=-1 --ulimit stack=67108864 --ulimit nofile=65536:65536 \
       -it ghcr.io/eduardoslonski/telescope:latest /bin/bash
     ```

@@ -125,6 +125,7 @@ environments:
 | `enable_prompt_prefetch` | `bool` | `true` | Prefetch prompts from the dataset |
 | `prompt_prefetch_buffer_size` | `int` | `24` | Number of prompts to prefetch |
 | `enable_individual_sample_lanes` | `bool` | `true` | Each sample gets its own lane slot instead of one per group |
+| `free_lane_after_generation` | `bool` | `true` | Free inference lane after generation completes (before reward computation). Improves throughput when reward computation is slow (e.g., sandbox environments). Requires `enable_individual_sample_lanes` |
 | `max_off_policy_steps` | `int` | `8` | Cancel in-flight rollouts after this many weight updates |
 
 ## Trainer
@@ -250,6 +251,9 @@ evals:
 | `wandb_run_name` | `str` | `"telescope_run"` | W&B run name |
 | `wandb_tags` | `list[str]` | `["telescope"]` | W&B tags |
 | `wandb_upload_code` | `bool` | `true` | Upload source code to W&B |
+| `wandb_upload_logs` | `bool` | `true` | Upload trainer/inference logs to W&B |
+| `wandb_upload_logs_detailed` | `bool` | `false` | Include detailed logs in W&B upload |
+| `wandb_upload_logs_stdout` | `bool` | `false` | Include stdout logs in W&B upload |
 | `wandb_code_max_file_size_mb` | `float` | `2.0` | Max file size for code upload |
 | `wandb_code_exclude_patterns` | `list[str]` | `[".git", ".venv", ...]` | Glob patterns to exclude from code upload |
 | `system_metrics_collection_interval_seconds` | `float` | `1.0` | System metrics collection interval |

@@ -1,0 +1,27 @@
+---
+title: "Logs"
+---
+
+The Logs page shows trainer and inference logs collected during training. You can access it from the **Logs** button on the Overview page.
+
+## Filtering
+
+The toolbar provides several filters to narrow down log entries:
+
+- **Component** — filter by source component (orchestrator, trainer, inference)
+- **Level** — toggle log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- **Source** — filter by specific source within a component
+
+Log levels are color-coded for quick scanning. Components are also color-coded to distinguish orchestrator, trainer, and inference logs at a glance.
+
+## Search
+
+A text search box lets you filter logs by message content. Results update as you type.
+
+## Pagination
+
+Logs are paginated for performance. Use the page navigation at the bottom to browse through results.
+
+<Note>
+  Log upload must be enabled in the training config (`wandb_upload_logs: true`, which is the default). You can also enable detailed logs (`wandb_upload_logs_detailed`) and stdout logs (`wandb_upload_logs_stdout`) for more verbose output.
+</Note>

@@ -65,7 +65,8 @@
               "visualization/rollouts",
               "visualization/timeline",
               "visualization/infra",
-              "visualization/evals"
+              "visualization/evals",
+              "visualization/logs"
             ]
           },
           {

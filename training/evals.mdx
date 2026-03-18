@@ -64,7 +64,34 @@ When Telescope resolves an eval `name`, it checks two locations in order:
 1. **Dedicated eval** — `src/telescope/evals/<name>/eval.py`
 2. **Environment fallback** — `src/telescope/environments/<name>/environment.py`
 
-This means any training environment can also be used as an eval by referencing its name. Dedicated evals exist for benchmarks that have no training environment (e.g., `math500` uses the MATH-500 test set but wraps the `hendrycks_math` environment for answer verification).
+This means any training environment can also be used as an eval by referencing its name. Dedicated evals exist for benchmarks that don't have a corresponding training environment.
+
+### Built-in evals
+
+Telescope ships with several standalone evals that can be used out of the box:
+
+| Eval | Samples | Dataset | Description |
+|------|---------|---------|-------------|
+| `math500` | 500 | [HuggingFaceH4/MATH-500](https://huggingface.co/datasets/HuggingFaceH4/MATH-500) | MATH benchmark test set with symbolic answer verification |
+| `aime_2024` | 30 | [HuggingFaceH4/aime_2024](https://huggingface.co/datasets/HuggingFaceH4/aime_2024) | 2024 American Invitational Mathematics Examination |
+| `aime_2025` | 30 | [opencompass/AIME2025](https://huggingface.co/datasets/opencompass/AIME2025) | 2025 AIME (Parts I and II) |
+| `gpqa_diamond` | 198 | [Idavidrein/gpqa](https://huggingface.co/datasets/Idavidrein/gpqa) | Graduate-level multiple-choice scientific reasoning (physics, chemistry, biology) |
+
+`math500`, `aime_2024`, and `aime_2025` require `math_verify` (`uv add math-verify`). `gpqa_diamond` may require HuggingFace authentication (`huggingface-cli login`).
+
+```yaml
+evals:
+  - name: "math500"
+    eval_every: 10
+    num_samples: 500
+    max_tokens: 3000
+  - name: "aime_2024"
+    eval_every: 50
+    max_tokens: 4000
+  - name: "gpqa_diamond"
+    eval_every: 50
+    max_tokens: 3000
+```
 
 ## Building a dedicated eval
 

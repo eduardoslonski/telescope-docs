@@ -13,13 +13,14 @@ The default view organizes every available metric into sections:
 - **Samples Metrics** — per-reward-function breakdowns from your environment's `sample_metrics`
 - **Advantage** — advantage statistics with a zero-line reference
 - **Evals** — one subsection per eval, showing eval-specific metrics
+- **Inference Performance** — time-bucketed bar charts showing throughput metrics: inference calls/min, requests done/min, rollout groups done/min (total, kept, discarded, canceled). Configurable bucket interval and optional step completion lines
 - **Rollouts** — token length distributions for prompts, completions, and totals
 - **Discarded Rollouts** — discard counts, zero-advantage breakdowns, and token metrics for discarded samples
 - **Timeline** — step timing breakdowns (forward, backward, loss, KL, weight sync, etc.) at both full-step and per-microbatch granularity
 
 ## Custom view
 
-A fully editable dashboard where you can build your own layout. Create **sections** and **groups**, add plots from the metric catalog, and reorder everything with drag-and-drop. The layout is saved server-side, so it persists across sessions and devices.
+A fully editable dashboard where you can build your own layout. Create **sections** and **groups**, add plots from the metric catalog, and reorder everything with drag-and-drop. You can add the same plot multiple times with independent filter settings — useful for comparing different views of the same metric. The layout is saved server-side, so it persists across sessions and devices.
 
 ## Per-chart controls
 

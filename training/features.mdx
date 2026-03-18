@@ -162,6 +162,14 @@ Weight synchronization supports bucketed flattening for throughput or per-tensor
 
 Each sample gets its own concurrency slot instead of one per prompt group, improving throughput for environments with high variance in completion time. Enabled by default. Controlled by `enable_individual_sample_lanes`.
 
+### Free lane after generation
+
+When enabled, inference lane slots are freed as soon as generation completes — before reward computation starts. This allows queued samples to begin generating immediately, improving throughput when reward computation is slow (e.g., sandbox-based environments like code generation). Enabled by default. Requires `enable_individual_sample_lanes`. Controlled by `free_lane_after_generation`.
+
+### Log upload
+
+Trainer and inference process logs are captured via file tailers and uploaded to W&B as compressed archives. The Telescope UI can then display these logs in its [Logs page](/visualization/logs), with filtering by component, level, and source. Controlled by `wandb_upload_logs`, `wandb_upload_logs_detailed`, and `wandb_upload_logs_stdout`.
+
 ### Reward normalization
 
 When training on multiple environments with different reward scales, `reward_min` and `reward_max` per environment allow Telescope to normalize rewards to a common range. This prevents environments with larger reward magnitudes from dominating the training signal. See [Metrics](/training/metrics).

@@ -260,6 +260,90 @@ max_tokens: 2000
 
 ---
 
+## DAPO Math
+
+Mathematical reasoning using the [DAPO Math 17K](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k) dataset — a diverse collection of ~17K math problems. The model must solve problems and provide the final answer inside `\boxed{}`. Answers are verified symbolically using `math_verify`.
+
+```bash
+uv run train.py --config configs/examples/example_dapo_math.yaml
+```
+
+<Accordion title="Config">
+```yaml
+model: "Qwen/Qwen2.5-3B"
+
+inference_num_workers: 2
+trainer_num_workers: 2
+
+environments:
+  - name: "dapo_math"
+    reward_min: 0.0
+    reward_max: 1.0
+
+prompts_batch_size_for_trainer: 16
+group_size: 8
+number_of_steps: 300
+algorithm: "grpo"
+
+max_model_len: 4096
+max_tokens: 3000
+```
+</Accordion>
+
+**Dataset**: [BytedTsinghua-SIA/DAPO-Math-17k](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k)
+
+<Note>
+  This config uses 2 GPUs for training and 2 for inference (4 total). Adjust `trainer_num_workers` and `inference_num_workers` to match your setup.
+</Note>
+
+<Note>
+  This example requires `math_verify` for symbolic answer verification. Install it with `uv add math-verify`.
+</Note>
+
+---
+
+## DeepScaler
+
+Mathematical reasoning for iterative context lengthening, using the [DeepScaleR](https://huggingface.co/datasets/agentica-org/DeepScaleR-Preview-Dataset) dataset. The model must solve problems and provide the final answer inside `\boxed{}`. Answers are verified symbolically using `math_verify`.
+
+```bash
+uv run train.py --config configs/examples/example_deepscaler.yaml
+```
+
+<Accordion title="Config">
+```yaml
+model: "Qwen/Qwen2.5-3B"
+
+inference_num_workers: 2
+trainer_num_workers: 2
+
+environments:
+  - name: "deepscaler"
+    reward_min: 0.0
+    reward_max: 1.0
+
+prompts_batch_size_for_trainer: 16
+group_size: 8
+number_of_steps: 300
+algorithm: "grpo"
+
+max_model_len: 4096
+max_tokens: 3000
+```
+</Accordion>
+
+**Dataset**: [agentica-org/DeepScaleR-Preview-Dataset](https://huggingface.co/datasets/agentica-org/DeepScaleR-Preview-Dataset)
+
+<Note>
+  This config uses 2 GPUs for training and 2 for inference (4 total). Adjust `trainer_num_workers` and `inference_num_workers` to match your setup.
+</Note>
+
+<Note>
+  This example requires `math_verify` for symbolic answer verification. Install it with `uv add math-verify`.
+</Note>
+
+---
+
 ## Code Generation
 
 Code generation with sandboxed test execution. The model generates Python code that is executed against hidden test cases in an isolated sandbox.
